@@ -1,0 +1,21 @@
+# --- Large model weights & checkpoints (never commit) ---
+pretrained_weight/
+.checkpoints/
+
+# --- Data: input videos, extracted audio, masks, inpainted, outputs, logs ---
+data/
+
+# --- Generated input/run manifests (regenerate via generate_inputs.py / preprocess.py) ---
+*.jsonl
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# --- Editor / OS ---
+.DS_Store
+*.swp
