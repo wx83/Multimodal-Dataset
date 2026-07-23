@@ -137,19 +137,89 @@ $AVPY preprocess.py --input_jsonl inputs.jsonl --audio_dir data/work/source_audi
 $AVPY run.py --input_jsonl inputs_preprocessed.jsonl   # mock mode is the default
 ```
 
-### 3. Real run on a GPU node
+### 3. Interactive session on a GPU node
 
-Interactive:
+Grab a node and set the environment:
 
 ```bash
 srun -p sharedp --gres=gpu:h100:1 --pty bash -l
-export OPENAI_API_KEY=sk-...            # or pin targets, see _e2e_showcase_batch.py
-export AVGRAPH_USE_REAL_MODELS=1
+cd /group2/ct/weihanx/av_langgraph_pipeline
+
+export AVGRAPH_USE_REAL_MODELS=1          # real models instead of mocks
+export SAM3_FIRST_FRAME_THRESHOLD=0.05    # dev gates (production: 0.80/0.15/0.80)
+export MASK_AREA_THRESHOLD=0.05
+export VISUAL_SCORE_THRESHOLD=0.40
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export PYTHONNOUSERSITE=1
+unset PYTHONPATH
+
+AVPY=/home/weihan.xu/miniconda3/envs/avgraph/bin/python
+```
+
+For object extraction either `export OPENAI_API_KEY=sk-...` or pin the target
+yourself (below).
+
+**One prepared sample** (cached caption + pinned target, see
+`_e2e_showcase_batch.py` for the sample list):
+
+```bash
+$AVPY _e2e_showcase_batch.py --5A5ZCa1dE
+```
+
+Prints `SAMPLE_START`, runs every node live, ends with a `SAMPLE_RESULT` line
+(status, gate scores, enhanced mp4 path).
+
+**Your own video, watching node-by-node:**
+
+```bash
+# extract the 48 kHz mono wav the audio stage needs
+FFMPEG=/group2/ct/weihanx/miniconda3/envs/qwen3omni/bin/ffmpeg
+$FFMPEG -y -i /path/to/myclip.mp4 -vn -ac 1 -ar 48000 data/work/source_audio/myclip.wav
+
+$AVPY - <<'EOF'
+from main import build_graph
+
+# optional: pin the target object (skips the OpenAI call)
+import nodes
+from models.object_extraction_model import ObjectExtractionModel
+class Pinned(ObjectExtractionModel):
+    def extract(self, caption): return ["dog"]      # your target here
+nodes._get_object_model = lambda: Pinned(mock=True)
+
+graph = build_graph()
+initial = {
+    "sample_id": "myclip",
+    "av_pair_path": "/path/to/myclip.mp4",          # ~8 s clip with audio
+    "audio_path": "data/work/source_audio/myclip.wav",
+    "retry_count": 0, "max_retries": 0, "status": "running",
+    # optional: skip the ~10-min Qwen3-Omni caption by supplying your own
+    # "mock_caption": "A dog barks next to a parked car.",
+}
+for step in graph.stream(initial, stream_mode="updates"):
+    for node, update in step.items():
+        print(f"== {node}: {update}")
+EOF
+```
+
+Each node prints its update as it finishes — caption, chosen target, mask
+ratio, gate decisions, and finally `enhanced_video_path`, or exactly where the
+sample was discarded and why.
+
+**A batch of videos:**
+
+```bash
 $AVPY run.py --input_jsonl inputs_preprocessed.jsonl
 ```
 
-Batch via SLURM (recommended — see the `run_*.sh` scripts for ready-made
-`sbatch` templates):
+Timing on one H100: caption ~10 min (skippable via `mock_caption`), SAM3
+~1–2 min, EffectErase ~10 min, best-of-10 audio ~10 min, LTX-2 enhance ~7 min —
+roughly 20–40 min per passing clip; discards exit early (a mask-gate fail
+costs ~15 s).
+
+### 4. Batch via SLURM
+
+Recommended for anything bigger — see the `run_*.sh` scripts for ready-made
+`sbatch` templates:
 
 - `run_e2e_batch.sh <id> [<id> ...]` — full pipeline for a list of samples
   (uses cached captions + pinned targets from `_e2e_showcase_batch.py`).
