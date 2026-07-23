@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AV Data-Curation Agent — Stage-by-Stage Evolution</title>
+<style>
+  :root {
+    --bg: #0f1117; --card: #181b24; --card2: #1f2330; --text: #e8eaf0;
+    --muted: #9aa1b5; --accent: #6ea8fe; --ok: #4ade80; --warn: #fbbf24;
+    --border: #2a2f40;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.55; padding: 2.5rem 1rem 4rem;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; }
+  header { text-align: center; margin-bottom: 2.5rem; }
+  header h1 { font-size: 1.9rem; margin-bottom: .5rem; }
+  header p.sub { color: var(--muted); max-width: 46rem; margin: 0 auto; }
+  .flow {
+    display: flex; flex-wrap: wrap; justify-content: center; gap: .4rem;
+    margin: 1.4rem auto 0; font-size: .78rem; color: var(--muted);
+  }
+  .flow span.n { background: var(--card2); border: 1px solid var(--border);
+    border-radius: 999px; padding: .25rem .7rem; white-space: nowrap; }
+  .flow span.a { align-self: center; color: var(--accent); }
+  .stage {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 1.6rem; margin-bottom: 1.6rem;
+  }
+  .stage h2 { font-size: 1.15rem; margin-bottom: .2rem; }
+  .stage h2 .num {
+    display: inline-block; background: var(--accent); color: #0b1020;
+    border-radius: 8px; font-size: .8rem; font-weight: 700;
+    padding: .1rem .55rem; margin-right: .6rem; vertical-align: 2px;
+  }
+  .model { color: var(--accent); font-size: .82rem; margin-bottom: .8rem; }
+  .stage p.desc { color: var(--muted); font-size: .92rem; margin-bottom: 1rem; }
+  video, audio { width: 100%; border-radius: 10px; background: #000; outline: none; }
+  audio { background: transparent; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  @media (max-width: 700px) { .grid2 { grid-template-columns: 1fr; } }
+  .cell .lbl { font-size: .8rem; color: var(--muted); margin: .45rem 0 .2rem; text-align: center; }
+  .caption-box {
+    background: var(--card2); border-left: 3px solid var(--accent);
+    border-radius: 8px; padding: .9rem 1.1rem; font-size: .95rem; font-style: italic;
+  }
+  .chips { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .9rem; }
+  .chip {
+    background: var(--card2); border: 1px solid var(--border); border-radius: 999px;
+    padding: .3rem .85rem; font-size: .82rem;
+  }
+  .chip b { color: var(--ok); font-weight: 600; }
+  .chip.target { border-color: var(--accent); color: var(--accent); }
+  .metrics { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: 1rem; }
+  .metric {
+    background: var(--card2); border: 1px solid var(--border); border-radius: 10px;
+    padding: .5rem .9rem; font-size: .8rem; color: var(--muted);
+  }
+  .metric b { display: block; color: var(--text); font-size: 1rem; font-weight: 600; }
+  footer { text-align: center; color: var(--muted); font-size: .8rem; margin-top: 3rem; }
+  footer code { color: var(--text); }
+  .sep { text-align: center; margin: 3rem 0 1.6rem; }
+  .sep h2 { font-size: 1.5rem; }
+  .sep p { color: var(--muted); max-width: 44rem; margin: .4rem auto 0; font-size: .92rem; }
+  .badge { display: inline-block; border-radius: 999px; font-size: .72rem; font-weight: 700;
+    padding: .18rem .7rem; margin-left: .6rem; vertical-align: 2px; }
+  .badge.pass { background: rgba(74,222,128,.15); color: var(--ok); border: 1px solid var(--ok); }
+  .badge.gate { background: rgba(251,191,36,.12); color: var(--warn); border: 1px solid var(--warn); }
+  .grid4 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  @media (max-width: 700px) { .grid4 { grid-template-columns: 1fr; } }
+  .qa {
+    background: rgba(74,222,128,.07); border: 1px solid rgba(74,222,128,.35);
+    border-radius: 10px; padding: .8rem 1rem; margin-top: 1rem; font-size: .88rem;
+    color: var(--muted);
+  }
+  .qa b.t { color: var(--ok); }
+  .qa code { color: var(--text); background: var(--card2); border-radius: 4px;
+    padding: .05rem .35rem; font-size: .82rem; }
+  .demo-cta {
+    background: linear-gradient(135deg, rgba(110,168,254,.12), rgba(74,222,128,.08));
+    border: 1px solid var(--accent); border-radius: 14px;
+    padding: 1.4rem 1.6rem; margin-bottom: 1.6rem; text-align: center;
+  }
+  .demo-cta a.btn {
+    display: inline-block; background: var(--accent); color: #0b1020;
+    font-weight: 700; border-radius: 10px; padding: .6rem 1.4rem;
+    text-decoration: none; margin-top: .8rem;
+  }
+  .demo-cta p { color: var(--muted); font-size: .9rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>&#127916;&#128266; AV Data-Curation Agent</h1>
+  <p class="sub">A LangGraph agent that curates audio-video pairs: it identifies a sounding
+  object, segments it, erases it from the video, separates its sound from the audio, and
+  jointly refines the resulting pair with the LTX-2 denoising enhancer &mdash; discarding any
+  sample that fails a quality gate along the way.</p>
+  <div class="flow">
+    <span class="n">caption</span><span class="a">&#8594;</span>
+    <span class="n">sounding objects</span><span class="a">&#8594;</span>
+    <span class="n">SAM3 segment</span><span class="a">&#8594;</span>
+    <span class="n">EffectErase inpaint</span><span class="a">&#8594;</span>
+    <span class="n">SAM-Audio remove</span><span class="a">&#8594;</span>
+    <span class="n">LTX-2 enhance</span><span class="a">&#8594;</span>
+    <span class="n">paired AV output</span>
+  </div>
+</header>
+
+<div class="sep" style="margin-top:1rem">
+  <h2>Successful curations</h2>
+  <p>Four clips passed every gate &mdash; segmentation, visual removal, and audio removal &mdash;
+  and were jointly refined by the LTX-2 enhancer. Three are shown here; the fourth (an airplane
+  wing) is unpacked stage by stage further down.</p>
+</div>
+
+<!-- ex3 --IOqc-XgYo_000000 -->
+<section class="stage">
+  <h2>Electronic keyboard cover <span class="badge pass">&#10003; all gates passed</span></h2>
+  <div class="model">sample --IOqc-XgYo_000000 &middot; target: black electronic keyboard &middot; mask area 0.168 &middot; visual removal 1.00 &middot; audio removal 0.90</div>
+  <p class="desc">&ldquo;A young man with glasses sits at a black electronic keyboard, playing it
+  with both hands&hellip;&rdquo; The keyboard is segmented, erased from the video, and its sound
+  separated out of the track. The keyboard was essentially the only sound source, so the residual
+  is near-silence &mdash; exactly what a clean separation should leave.</p>
+  <div class="grid4">
+    <div class="cell"><video controls preload="metadata" src="media/ex3_input.mp4"></video><div class="lbl">input</div></div>
+    <div class="cell"><video controls preload="metadata" src="media/ex3_overlay.mp4"></video><div class="lbl">SAM3 mask</div></div>
+    <div class="cell"><video controls preload="metadata" src="media/ex3_inpainted.mp4"></video><div class="lbl">inpainted (silent)</div></div>
+    <div class="cell"><video controls preload="metadata" src="media/ex3_enhanced.mp4"></video><div class="lbl">final: enhanced AV pair</div></div>
+  </div>
+  <div class="cell" style="margin-top:1rem"><div class="lbl">&#128266; residual audio (keyboard removed)</div>
+    <audio controls preload="metadata" src="media/ex3_residual.wav"></audio></div>
+</section>
+
+<!-- ex4 --SQyOb8eS0_000030 -->
+<section class="stage">
+  <h2>Harpist <span class="badge pass">&#10003; all gates passed</span></h2>
+  <div class="model">sample --SQyOb8eS0_000030 &middot; target: woman &middot; mask area 0.224 &middot; visual removal 1.00 &middot; audio removal 0.90</div>
+  <p class="desc">&ldquo;A woman with dark hair, wearing a black top, sits and plays a large wooden
+  harp&hellip;&rdquo; The woman is removed from the video and her harp playing separated from the
+  soundtrack.</p>
+  <div class="grid4">
+    <div class="cell"><video controls preload="metadata" src="media/ex4_input.mp4"></video><div class="lbl">input</div></div>
+    <div class="cell"><video controls preload="metadata" src="media/ex4_overlay.mp4"></video><div class="lbl">SAM3 mask</div></div>
+    <div class="cell"><video controls preload="metadata" src="media/ex4_inpainted.mp4"></video><div class="lbl">inpainted (silent)</div></div>
+    <div class="cell"><video controls preload="metadata" src="media/ex4_enhanced.mp4"></video><div class="lbl">final: enhanced AV pair</div></div>
+  </div>
+  <div class="cell" style="margin-top:1rem"><div class="lbl">&#128266; residual audio (woman removed)</div>
+    <audio controls preload="metadata" src="media/ex4_residual.wav"></audio></div>
+</section>
+
+<!-- ex6 --NVTlZnl00 -->
+<section class="stage">
+  <h2>Wheel loader <span class="badge pass">&#10003; all gates passed</span></h2>
+  <div class="model">sample --NVTlZnl00 &middot; target: wheel loader &middot; mask area 0.643 &middot; visual removal 1.00 &middot; audio removal 0.90</div>
+  <p class="desc">&ldquo;An orange Daewoo wheel loader is parked on a dirt and gravel
+  surface&hellip; The loader&rsquo;s engine is idling, and a plume of dark smoke is emitted from
+  its exhaust pipe.&rdquo; The machine is removed from the scene and its idling engine from the
+  soundtrack.</p>
+  <div class="grid4">
+    <div class="cell"><video controls preload="metadata" src="media/ex6_input.mp4"></video><div class="lbl">input</div></div>
+    <div class="cell"><video controls preload="metadata" src="media/ex6_overlay.mp4"></video><div class="lbl">SAM3 mask</div></div>
+    <div class="cell"><video controls preload="metadata" src="media/ex6_inpainted.mp4"></video><div class="lbl">inpainted (silent)</div></div>
+    <div class="cell"><video controls preload="metadata" src="media/ex6_enhanced.mp4"></video><div class="lbl">final: enhanced AV pair</div></div>
+  </div>
+  <div class="cell" style="margin-top:1rem"><div class="lbl">&#128266; residual audio (engine removed)</div>
+    <audio controls preload="metadata" src="media/ex6_residual.wav"></audio></div>
+</section>
+
+<div class="sep">
+  <h2>How it works &mdash; one sample, stage by stage</h2>
+  <p>The fifth success, the airplane-wing clip, unpacked through every node of the agent &mdash;
+  a textbook pass: mask area 0.588, visual removal 1.00.</p>
+</div>
+
+<section class="stage">
+  <h2><span class="num">0</span>Input clip <span class="badge pass">&#10003; all gates passed</span></h2>
+  <div class="model">sample --5A5ZCa1dE &middot; 8 s &middot; 1280&times;720 @ 30 fps &middot; with original audio</div>
+  <p class="desc">The raw audio-video pair entering the pipeline.</p>
+  <video controls preload="metadata" src="media/ex5_input.mp4"></video>
+</section>
+
+<section class="stage">
+  <h2><span class="num">1</span>AV caption generation</h2>
+  <div class="model">Qwen3-Omni (audio-visual captioner)</div>
+  <p class="desc">The agent first describes the clip &mdash; both what it sees and what it hears.</p>
+  <div class="caption-box">The video shows a view from an airplane window, focusing on the
+  aircraft&rsquo;s white wing and its flaps. The plane is flying over a large body of water, with
+  several small, dark islands visible in the distance. The wing&rsquo;s flaps are extended
+  downwards, indicating the plane is likely in the process of landing or taking off. The sky is
+  overcast with grey clouds. The sound of the airplane&rsquo;s engines is audible throughout the
+  clip.</div>
+  <div class="qa"><b class="t">&#128737; Quality assurance:</b> the caption must explicitly name
+  what is <i>heard</i>, not just what is seen &mdash; the audio-visual captioner listens to the
+  soundtrack. A caption with no identifiable sound source causes the sample to be discarded at
+  the next stage.</div>
+</section>
+
+<section class="stage">
+  <h2><span class="num">2</span>Sounding-object extraction</h2>
+  <div class="model">LLM extractor over the caption</div>
+  <p class="desc">From the caption, the agent extracts the objects that produce sound and picks the
+  removal target &mdash; here the wing, the visible part of the sound-producing aircraft.</p>
+  <div class="chips">
+    <span class="chip target">&#127919; target: airplane wing</span>
+  </div>
+  <div class="qa"><b class="t">&#128737; Gate 1 &mdash; sounding object exists:</b> the extractor
+  only accepts objects with a physical sound-production mechanism (engines, strings, voices
+  &mdash; not walls or roads). If it returns none, the route function sends the sample to
+  <code>discard</code> immediately.</div>
+</section>
+
+<section class="stage">
+  <h2><span class="num">3</span>Target-object segmentation</h2>
+  <div class="model">SAM3 &middot; text-prompted video segmentation</div>
+  <p class="desc">SAM3 tracks the target through every frame. The mask gates the sample: too small
+  an object isn&rsquo;t worth curating.</p>
+  <div class="grid2">
+    <div class="cell">
+      <video controls preload="metadata" src="media/ex5_overlay.mp4"></video>
+      <div class="lbl">mask overlaid on video</div>
+    </div>
+    <div class="cell">
+      <video controls preload="metadata" src="media/ex5_mask.mp4"></video>
+      <div class="lbl">binary mask track</div>
+    </div>
+  </div>
+  <div class="metrics">
+    <div class="metric">mask area ratio<b>0.588</b></div>
+  </div>
+  <div class="qa"><b class="t">&#128737; Gate 2 &mdash; the object must be big enough:</b>
+  two-step check. First a cheap fail-fast: SAM3 segments only frame&nbsp;0, and if the target
+  covers less than the first-frame threshold the sample is discarded before any full-video work
+  (this is what rejected the race car below in ~15 s). Then the full mask-area ratio must clear
+  <code>MASK_AREA_THRESHOLD</code> (0.15 production; 0.05 in these dev runs). Wing: 0.588 &#10003;.</div>
+</section>
+
+<section class="stage">
+  <h2><span class="num">4</span>Video: object removal (inpainting)</h2>
+  <div class="model">EffectErase &middot; Wan2.1-Fun-1.3B-InP + LoRA</div>
+  <p class="desc">The masked wing is erased and the sea, islands, and sky hallucinated in &mdash;
+  the video branch of the output pair (silent; audio is handled by its own branch below). The
+  visual check re-segments the result with SAM3 and finds nothing left of the wing.</p>
+  <video controls preload="metadata" src="media/ex5_inpainted.mp4"></video>
+  <div class="metrics">
+    <div class="metric">visual removal score<b>1.00</b></div>
+  </div>
+  <div class="qa"><b class="t">&#128737; Gate 3 &mdash; closed-loop removal verification:</b>
+  the checker doesn&rsquo;t trust the inpainter. SAM3 re-segments the <i>inpainted</i> video with
+  the same text prompt and compares against the original mask &rarr; a removal score in [0,1]
+  (1 = nothing left of the object). It must clear <code>VISUAL_SCORE_THRESHOLD</code> (0.80
+  production; 0.40 in these dev runs). Wing: 1.00 &#10003;. This is the gate that rejected the
+  train derailment (0.435) and the bassoon (0.179) below.</div>
+</section>
+
+<section class="stage">
+  <h2><span class="num">5</span>Audio: target-sound removal</h2>
+  <div class="model">SAM-Audio &middot; best-of-10 (visual + text prompts &times; 5 seeds), ImageBind-ranked</div>
+  <p class="desc">Ten separation candidates are generated and scored with ImageBind; the winner
+  splits the soundtrack into the removed engine sound and the clean residual that pairs with the
+  inpainted video. Winner: <b>visual</b> prompt, seed 1453635084.</p>
+  <div class="grid2">
+    <div class="cell">
+      <div class="lbl">&#128266; residual (engine removed) &mdash; kept</div>
+      <audio controls preload="metadata" src="media/ex5_residual.wav"></audio>
+    </div>
+    <div class="cell">
+      <div class="lbl">&#128680; isolated target (engine) &mdash; discarded</div>
+      <audio controls preload="metadata" src="media/ex5_target.wav"></audio>
+    </div>
+  </div>
+  <div class="metrics">
+    <div class="metric">ImageBind text&harr;target<b>0.353</b></div>
+    <div class="metric">ImageBind text&harr;residual<b>0.028</b></div>
+    <div class="metric">audio removal score<b>0.90</b></div>
+  </div>
+  <div class="qa"><b class="t">&#128737; Gate 4 &mdash; QA by tournament:</b> instead of trusting
+  one separation, the agent generates <b>10 candidates</b> (visual-mask and text prompts &times;
+  5 fixed seeds) and scores each with ImageBind: text&harr;target similarity should be <i>high</i>
+  (the removed track really is the target sound) and text&harr;residual should be <i>low</i> (no
+  target sound left behind). Winner = max text&harr;target, tie-broken by min text&harr;residual.
+  A removal-score gate at 0.80 then decides whether the sample continues.</div>
+</section>
+
+<section class="stage">
+  <h2><span class="num">6</span>Joint AV enhancement (post-processing)</h2>
+  <div class="model">LTX-2.3 22B distilled &middot; SDEdit denoising enhancer (joint audio+video DiT)</div>
+  <p class="desc">The inpainted video and residual audio are muxed into one clip (conformed to
+  185 frames), VAE-encoded, re-noised to strength 0.4219, and denoised back down &mdash; video and
+  audio refined <b>together</b> through cross-modal attention. Compare before / after:</p>
+  <div class="grid2">
+    <div class="cell">
+      <video controls preload="metadata" src="media/ex5_paired.mp4"></video>
+      <div class="lbl">before &mdash; muxed pair (inpaint + residual)</div>
+    </div>
+    <div class="cell">
+      <video controls preload="metadata" src="media/ex5_enhanced.mp4"></video>
+      <div class="lbl">after &mdash; LTX-2 enhanced (final output)</div>
+    </div>
+  </div>
+  <div class="metrics">
+    <div class="metric">denoise strength<b>0.4219</b></div>
+    <div class="metric">frames<b>185 @ 24 fps</b></div>
+    <div class="metric">audio out<b>stereo 48 kHz</b></div>
+  </div>
+  <div class="qa"><b class="t">&#128737; Quality assurance:</b> three safeguards. (1) The input is
+  conformed to the VAE&rsquo;s hard constraints before the 46&nbsp;GB model loads (frames = 8k+1,
+  dimensions divisible by 32, AAC audio) and re-probed afterwards. (2) The denoise strength is the
+  <i>lightest</i> reachable on the distilled sigma grid &mdash; a single denoising step that
+  polishes texture without regenerating content. (3) The run fails loudly unless the output
+  carries an enhanced audio stream &mdash; a silent mux bug can&rsquo;t slip through.</div>
+</section>
+
+<div class="sep">
+  <h2>Where the agent says no</h2>
+  <p>Four clips the agent&rsquo;s gates reject: an ill-posed target, two inpaintings the visual
+  check flagged, and an object too small to bother with. Discarded samples stop at their gate
+  &mdash; that is the curation working as intended.</p>
+</div>
+
+<!-- hero-as-discard 9NcjRFu6C4I -->
+<section class="stage">
+  <h2>Train derailment <span class="badge gate">&#9888; visual gate: discard (production threshold)</span></h2>
+  <div class="model">sample 9NcjRFu6C4I &middot; target: train engine &middot; mask area 0.095 &middot; visual removal 0.435 &lt; 0.80 production gate</div>
+  <p class="desc">&ldquo;A blue and yellow CSX locomotive travels along a track&hellip; the train
+  derails and begins to flip over&hellip;&rdquo; The derailing, flipping train is hard to erase:
+  SAM3 still finds over half of it after inpainting (removal 0.435). This run used a relaxed
+  development threshold of 0.40, so the pipeline completed all stages &mdash; but the production
+  gate (0.80) discards it, and rightly so: look closely at the inpainted frames.</p>
+  <div class="grid4">
+    <div class="cell"><video controls preload="metadata" src="media/00_input.mp4"></video><div class="lbl">input</div></div>
+    <div class="cell"><video controls preload="metadata" src="media/03_mask_overlay.mp4"></video><div class="lbl">SAM3 mask</div></div>
+    <div class="cell"><video controls preload="metadata" src="media/04_inpainted.mp4"></video><div class="lbl">inpainted &mdash; train still visible</div></div>
+    <div class="cell"><video controls preload="metadata" src="media/06_enhanced.mp4"></video><div class="lbl">enhanced (for comparison)</div></div>
+  </div>
+  <div class="cell" style="margin-top:1rem"><div class="lbl">&#128266; residual audio (train removed)</div>
+    <audio controls preload="metadata" src="media/05_residual_audio.wav"></audio></div>
+</section>
+
+<!-- ex1 --8Bq81udbw -->
+<section class="stage">
+  <h2>Eel on the ocean floor <span class="badge gate">&#9888; visual gate: discard</span></h2>
+  <div class="model">sample --8Bq81udbw &middot; target: flowing water &middot; mask area 0.489 &middot; visual removal &minus;0.105</div>
+  <p class="desc">&ldquo;An eel with a spotted body lies coiled on the sandy ocean floor&hellip;
+  The sound of flowing water is heard in the background.&rdquo; The agent targeted the
+  <b>flowing water</b> sound, but the &ldquo;water&rdquo; region is half the frame &mdash;
+  removing the background is ill-posed, and the inpaint failed the visual check (score
+  &minus;0.105). All stages were completed offline for illustration.</p>
+  <div class="grid4">
+    <div class="cell"><video controls preload="metadata" src="media/ex1_input.mp4"></video><div class="lbl">input</div></div>
+    <div class="cell"><video controls preload="metadata" src="media/ex1_overlay.mp4"></video><div class="lbl">SAM3 mask</div></div>
+    <div class="cell"><video controls preload="metadata" src="media/ex1_inpainted.mp4"></video><div class="lbl">inpainted (silent)</div></div>
+    <div class="cell"><video controls preload="metadata" src="media/ex1_enhanced.mp4"></video><div class="lbl">enhanced (for comparison)</div></div>
+  </div>
+  <div class="cell" style="margin-top:1rem"><div class="lbl">&#128266; residual audio (flowing water removed)</div>
+    <audio controls preload="metadata" src="media/ex1_residual.wav"></audio></div>
+</section>
+
+<!-- ex7 --I3Bjp_ptc_000254 -->
+<section class="stage">
+  <h2>Bassoon tutorial <span class="badge gate">&#9888; visual gate: discard</span></h2>
+  <div class="model">sample --I3Bjp_ptc_000254 &middot; target: bassoon &middot; mask area 0.067 &middot; visual removal 0.179</div>
+  <p class="desc">&ldquo;On the right, a person&rsquo;s hands are shown playing a bassoon&hellip;
+  The audio consists of the deep, resonant sound of the bassoon playing a melody.&rdquo;
+  Segmentation found the bassoon, but the inpainter couldn&rsquo;t cleanly erase it &mdash;
+  SAM3 still detects most of it afterwards (removal 0.179 &lt; the 0.40 gate), so the agent
+  discarded the sample before the audio stages.</p>
+  <div class="grid4">
+    <div class="cell"><video controls preload="metadata" src="media/ex7_input.mp4"></video><div class="lbl">input</div></div>
+    <div class="cell"><video controls preload="metadata" src="media/ex7_overlay.mp4"></video><div class="lbl">SAM3 mask</div></div>
+    <div class="cell"><video controls preload="metadata" src="media/ex7_inpainted.mp4"></video><div class="lbl">inpainted &mdash; rejected by the gate</div></div>
+  </div>
+</section>
+
+<!-- ex8 ---lTs1dxhU -->
+<section class="stage">
+  <h2>Race car (sim) <span class="badge gate">&#9888; mask gate: discard</span></h2>
+  <div class="model">sample ---lTs1dxhU &middot; target: race car &middot; first-frame mask &lt; 0.05 &rarr; stopped at segmentation</div>
+  <p class="desc">&ldquo;A black single-seater race car drives at high speed around a
+  racetrack&hellip; a loud, high-pitched whine&hellip;&rdquo; The car covers only a tiny
+  fraction of the frame, so the first-frame mask check failed and the agent discarded the
+  sample immediately &mdash; no inpainting or audio work was spent on it.</p>
+  <div class="grid4">
+    <div class="cell"><video controls preload="metadata" src="media/ex8_input.mp4"></video><div class="lbl">input &mdash; the only stage reached</div></div>
+  </div>
+</section>
+
+<footer>
+  Produced by the <code>av_langgraph_pipeline</code> LangGraph agent &middot;
+  gates: mask area, visual removal, audio removal &middot; post-processed by the LTX-2 joint AV
+  denoising enhancer.
+</footer>
+
+</div>
+</body>
+</html>

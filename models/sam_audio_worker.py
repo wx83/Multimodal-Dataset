@@ -73,6 +73,12 @@ def _patch_hf_hub_compat():
 def load_sam_audio(model_dir):
     """Load SAM-Audio (and its internal judge/ranker) under huggingface_hub 1.x."""
     _patch_hf_hub_compat()
+    # The CLAP/ImageBind/judge rankers are only consulted when
+    # separate(reranking_candidates>1), which this worker never does (best_of
+    # selection happens downstream in ib_select_worker.py). facebook/sam-audio-judge
+    # is a gated repo this cluster cannot download, so null the rankers out
+    # instead of letting __init__ fetch them.
+    sys.modules[SAMAudio.__module__].create_ranker = lambda config: None
     return SAMAudio.from_pretrained(model_dir)
 
 
@@ -86,10 +92,87 @@ def load_frames_24fps(video_path, max_seconds, fps, sam3_repo):
     return frames  # (N, C, H, W) uint8 RGB
 
 
+def _seed_all(seed):
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+
+def run_best_of(args, model, processor, device):
+    """Generate visual(mask)- and text-prompted candidates for each seed.
+
+    Writes {output_dir}/candidates/{method}_seed_{seed}/{target,residual}.wav
+    (the ranking_test layout) plus candidates.json for ib_select_worker.py,
+    which scores all candidates with ImageBind and picks the winner.
+    """
+    if not args.seeds:
+        raise SystemExit("--mode best_of requires --seeds (comma-separated ints)")
+    if not (args.video and args.mask):
+        raise SystemExit("--mode best_of requires --video and --mask")
+    seeds = [int(s) for s in args.seeds.split(",") if s.strip()]
+
+    frames = load_frames_24fps(args.video, args.max_seconds, args.fps, args.sam3_repo)
+    mask = VideoDecoder(args.mask)[:]
+    n = min(frames.shape[0], mask.shape[0])
+    frames, mask = frames[:n], mask[:n]
+    audio_src = args.audio or args.video
+    batches = {
+        "visual": processor(
+            audios=[audio_src],
+            descriptions=[args.prompt],
+            masked_videos=processor.mask_videos([frames], [mask]),
+        ).to(device),
+        "text": processor(
+            audios=[args.input_audio or audio_src],
+            descriptions=[args.prompt],
+        ).to(device),
+    }
+
+    sr = processor.audio_sampling_rate
+    rows = []
+    for method, batch in batches.items():
+        for seed in seeds:
+            _seed_all(seed)
+            with torch.no_grad():
+                result = model.separate(batch)
+            target = result.target[0] if isinstance(result.target, list) else result.target
+            residual = result.residual[0] if isinstance(result.residual, list) else result.residual
+            cand_dir = os.path.join(args.output_dir, "candidates", f"{method}_seed_{seed}")
+            os.makedirs(cand_dir, exist_ok=True)
+            target_path = os.path.join(cand_dir, "target.wav")
+            residual_path = os.path.join(cand_dir, "residual.wav")
+            torchaudio.save(target_path, target.cpu(), sr)
+            torchaudio.save(residual_path, residual.cpu(), sr)
+            rows.append({"method": method, "seed": seed,
+                         "target_wav": target_path, "residual_wav": residual_path})
+            print(f"[best_of] {method} seed={seed} done", flush=True)
+
+    res = {
+        "sample_id": args.sample_id,
+        "mode": "best_of",
+        "prompt": args.prompt,
+        "video_path": args.video,
+        "sample_rate": sr,
+        "num_frames": n,
+        "seeds": seeds,
+        "candidates_json": os.path.join(args.output_dir, "candidates.json"),
+        "rows": rows,
+    }
+    with open(res["candidates_json"], "w", encoding="utf-8") as f:
+        json.dump(res, f, ensure_ascii=False, indent=2)
+    if args.out:
+        with open(args.out, "w", encoding="utf-8") as f:
+            json.dump(res, f, ensure_ascii=False)
+    sys.stdout.write(RESULT_MARKER + json.dumps(res, ensure_ascii=False) + "\n")
+    sys.stdout.flush()
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--mode", choices=["mask", "text"], default="mask",
-                    help="mask: condition on the SAM3 mask video; text: condition on the object name.")
+    ap.add_argument("--mode", choices=["mask", "text", "best_of"], default="mask",
+                    help="mask: condition on the SAM3 mask video; text: condition on the object name; "
+                         "best_of: run BOTH prompt modes for each of --seeds, writing all candidates "
+                         "for downstream ImageBind selection (models/ib_select_worker.py).")
     ap.add_argument("--video", help="Original mp4 (frames source). [mask mode]")
     ap.add_argument("--audio", help="Audio source wav (preprocess output). [mask mode; falls back to --video]")
     ap.add_argument("--mask", help="SAM3 binary mask mp4. [mask mode]")
@@ -102,11 +185,19 @@ def main():
     ap.add_argument("--max_seconds", type=int, default=8)
     ap.add_argument("--fps", type=int, default=24)
     ap.add_argument("--out", default=None)
+    ap.add_argument("--seed", type=int, default=None,
+                    help="Seed the separation noise (mask/text modes).")
+    ap.add_argument("--seeds", default=None,
+                    help="Comma-separated seeds for --mode best_of.")
     args = ap.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = load_sam_audio(args.model_dir).eval().to(device)
     processor = SAMAudioProcessor.from_pretrained(args.model_dir)
+
+    if args.mode == "best_of":
+        run_best_of(args, model, processor, device)
+        return
 
     n = None
     if args.mode == "mask":
@@ -126,6 +217,8 @@ def main():
         prefix = "text_"
     batch = batch.to(device)
 
+    if args.seed is not None:
+        _seed_all(args.seed)
     with torch.no_grad():
         result = model.separate(batch)
 

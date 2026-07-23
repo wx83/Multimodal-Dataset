@@ -9,8 +9,9 @@ from main import build_graph
 ARTIFACT_KEYS = [
     "mask_path",
     "inpainted_video_path",
-    "mask_residual_audio_path",
     "text_residual_audio_path",
+    "paired_input_video_path",
+    "enhanced_video_path",
     "paired_av_output_path",
 ]
 

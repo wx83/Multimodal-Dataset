@@ -11,6 +11,7 @@ Stage -> module:
     target_object_segmentation-> segmentation_model.SegmentationModel
     effect_erase_inpainting   -> inpainting_model.InpaintingModel
     samaudio_remove_target    -> audio_removal_model.AudioRemovalModel
+    av_quality_enhancement    -> av_enhance_model.AVEnhanceModel
     inpainted_video_check     -> visual_checker.VisualChecker
     audio_removal_check       -> audio_checker.AudioChecker
     (av consistency gate)     -> cross_modal_checker.CrossModalChecker
@@ -18,6 +19,7 @@ Stage -> module:
 
 from .audio_checker import AudioChecker
 from .audio_removal_model import AudioRemovalModel
+from .av_enhance_model import AVEnhanceModel
 from .caption_model import CaptionModel
 from .cross_modal_checker import CrossModalChecker
 from .inpainting_model import InpaintingModel
@@ -31,6 +33,7 @@ __all__ = [
     "SegmentationModel",
     "InpaintingModel",
     "AudioRemovalModel",
+    "AVEnhanceModel",
     "VisualChecker",
     "AudioChecker",
     "CrossModalChecker",

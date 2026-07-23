@@ -20,9 +20,14 @@ from pathlib import Path
 from utils import write_text_artifact
 
 WORKER = Path(__file__).resolve().parent / "effecterase_worker.py"
-DEFAULT_EE_PYTHON = "/group2/ct/weihanx/miniconda3/envs/effecterase/bin/python"
-DEFAULT_BASE_MODEL_DIR = "/group2/ct/weihanx/Wan-AI/Wan2.1-Fun-1.3B-InP"
-DEFAULT_LORA_PATH = "/group2/ct/weihanx/av_langgraph_pipeline/pretrained_weight/inpainting/EffectErase.ckpt"
+# Env overrides make the pipeline portable to other hosts (see SELF_HOSTING.md).
+DEFAULT_EE_PYTHON = os.environ.get(
+    "EFFECTERASE_PYTHON", "/group2/ct/weihanx/miniconda3/envs/effecterase/bin/python")
+DEFAULT_BASE_MODEL_DIR = os.environ.get(
+    "WAN_BASE_MODEL_DIR", "/group2/ct/weihanx/Wan-AI/Wan2.1-Fun-1.3B-InP")
+DEFAULT_LORA_PATH = os.environ.get(
+    "EFFECTERASE_LORA",
+    "/group2/ct/weihanx/av_langgraph_pipeline/pretrained_weight/inpainting/EffectErase.ckpt")
 RESULT_MARKER = "EFFECTERASE_RESULT "
 
 

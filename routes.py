@@ -1,5 +1,12 @@
+import os
 from typing import Literal
 from state import AVState
+
+# Whole-video mask gate (fraction of frame the tracked object must cover).
+# Overridable for dev/demo runs on clips SAM3 tracks weakly.
+MASK_AREA_THRESHOLD = float(os.environ.get("MASK_AREA_THRESHOLD", "0.15"))
+# Visual-removal gate (SAM3 re-segmentation removal ratio on the inpainted video).
+VISUAL_SCORE_THRESHOLD = float(os.environ.get("VISUAL_SCORE_THRESHOLD", "0.80"))
 
 
 def route_after_object_extraction(state: AVState) -> Literal["continue", "discard"]:
@@ -9,13 +16,13 @@ def route_after_object_extraction(state: AVState) -> Literal["continue", "discar
 
 
 def route_after_mask_check(state: AVState) -> Literal["continue", "discard"]:
-    if state.get("mask_area_ratio", 0.0) > 0.15:
+    if state.get("mask_area_ratio", 0.0) > MASK_AREA_THRESHOLD:
         return "continue"
     return "discard"
 
 
 def route_after_visual_check(state: AVState) -> Literal["continue", "discard"]:
-    if state.get("visual_removal_score", 0.0) > 0.80:
+    if state.get("visual_removal_score", 0.0) > VISUAL_SCORE_THRESHOLD:
         return "continue"
     return "discard"
 

@@ -23,12 +23,15 @@ Notes:
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import tempfile
 from pathlib import Path
 
 WORKER = Path(__file__).resolve().parent / "qwen3_omni_worker.py"
-DEFAULT_QWEN_PYTHON = "/group2/ct/weihanx/miniconda3/envs/qwen3omni/bin/python"
+# Env override makes the pipeline portable to other hosts (see SELF_HOSTING.md).
+DEFAULT_QWEN_PYTHON = os.environ.get(
+    "QWEN3_PYTHON", "/group2/ct/weihanx/miniconda3/envs/qwen3omni/bin/python")
 RESULT_MARKER = "QWEN3_OMNI_RESULT "
 MOCK_CAPTION = "A dog is barking next to a car."
 

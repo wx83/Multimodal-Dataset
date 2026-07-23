@@ -21,7 +21,7 @@ import subprocess
 import sys
 import tempfile
 
-EE_REPO = "/group2/ct/weihanx/EffectErase"
+EE_REPO = os.environ.get("EFFECTERASE_REPO", "/group2/ct/weihanx/EffectErase")
 sys.path.insert(0, EE_REPO)
 sys.path.insert(0, os.path.join(EE_REPO, "examples/remove_wan"))
 

@@ -7,9 +7,9 @@ from nodes import (
     target_object_segmentation,
     effect_erase_inpainting,
     inpainted_video_check,
-    samaudio_remove_target,
-    samaudio_text_remove,
+    samaudio_best_of_remove,
     audio_removal_check,
+    av_quality_enhancement,
     paired_av_output,
     discard_sample,
 )
@@ -30,9 +30,9 @@ def build_graph():
     builder.add_node("target_object_segmentation", target_object_segmentation)
     builder.add_node("effect_erase_inpainting", effect_erase_inpainting)
     builder.add_node("inpainted_video_check", inpainted_video_check)
-    builder.add_node("samaudio_remove_target", samaudio_remove_target)
-    builder.add_node("samaudio_text_remove", samaudio_text_remove)
+    builder.add_node("samaudio_best_of_remove", samaudio_best_of_remove)
     builder.add_node("audio_removal_check", audio_removal_check)
+    builder.add_node("av_quality_enhancement", av_quality_enhancement)
     builder.add_node("paired_av_output", paired_av_output)
     builder.add_node("discard_sample", discard_sample)
 
@@ -63,23 +63,23 @@ def build_graph():
         "inpainted_video_check",
         route_after_visual_check,
         {
-            "continue": "samaudio_remove_target",
+            "continue": "samaudio_best_of_remove",
             "discard": "discard_sample",
         },
     )
 
-    builder.add_edge("samaudio_remove_target", "samaudio_text_remove")
-    builder.add_edge("samaudio_text_remove", "audio_removal_check")
+    builder.add_edge("samaudio_best_of_remove", "audio_removal_check")
 
     builder.add_conditional_edges(
         "audio_removal_check",
         route_after_audio_check,
         {
-            "continue": "paired_av_output",
+            "continue": "av_quality_enhancement",
             "discard": "discard_sample",
         },
     )
 
+    builder.add_edge("av_quality_enhancement", "paired_av_output")
     builder.add_edge("paired_av_output", END)
     builder.add_edge("discard_sample", END)
 

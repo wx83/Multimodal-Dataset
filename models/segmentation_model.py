@@ -26,9 +26,12 @@ from pathlib import Path
 from utils import write_text_artifact
 
 WORKER = Path(__file__).resolve().parent / "sam3_worker.py"
-DEFAULT_SAM3_PYTHON = "/group2/ct/weihanx/miniconda3/envs/sam3/bin/python"
-DEFAULT_SAM3_MODEL_DIR = "/group2/ct/weihanx/av_langgraph_pipeline/pretrained_weight/sam3"
-DEFAULT_SAM3_REPO = "/group2/ct/weihanx/sam3"
+# Env overrides make the pipeline portable to other hosts (see SELF_HOSTING.md).
+DEFAULT_SAM3_PYTHON = os.environ.get(
+    "SAM3_PYTHON", "/group2/ct/weihanx/miniconda3/envs/sam3/bin/python")
+DEFAULT_SAM3_MODEL_DIR = os.environ.get(
+    "SAM3_MODEL_DIR", "/group2/ct/weihanx/av_langgraph_pipeline/pretrained_weight/sam3")
+DEFAULT_SAM3_REPO = os.environ.get("SAM3_REPO", "/group2/ct/weihanx/sam3")
 RESULT_MARKER = "SAM3_RESULT "
 
 

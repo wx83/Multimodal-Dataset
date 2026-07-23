@@ -12,8 +12,9 @@ EXPECTED_NODES = [
     "target_object_segmentation",
     "effect_erase_inpainting",
     "inpainted_video_check",
-    "samaudio_remove_target",
+    "samaudio_best_of_remove",
     "audio_removal_check",
+    "av_quality_enhancement",
     "paired_av_output",
     "discard_sample",
 ]

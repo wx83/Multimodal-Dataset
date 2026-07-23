@@ -3,6 +3,7 @@ from functools import lru_cache, wraps
 
 from models import (
     AudioRemovalModel,
+    AVEnhanceModel,
     CaptionModel,
     InpaintingModel,
     ObjectExtractionModel,
@@ -100,6 +101,17 @@ def _get_inpainting_model() -> InpaintingModel:
     Removes the SAM3-masked object (and its effects) from the video.
     """
     return InpaintingModel(mock=not _use_real_models(), num_frames=INPAINT_NUM_FRAMES)
+
+
+@lru_cache(maxsize=1)
+def _get_av_enhance_model() -> AVEnhanceModel:
+    """AV quality enhancer: real LTX-2 denoising enhancer (subprocess, GPU) when
+    enabled, else mock.
+
+    Muxes the inpainted video with the residual audio (conformed to the VAE's
+    frames=8k+1 / div-32 rules), then SDEdit-refines both modalities jointly.
+    """
+    return AVEnhanceModel(mock=not _use_real_models())
 
 
 # ---------------------------
@@ -221,7 +233,8 @@ def inpainted_video_check(state: AVState) -> AVState:
 
     update: AVState = {"visual_removal_score": score}
 
-    if score <= 0.80:
+    from routes import VISUAL_SCORE_THRESHOLD  # single source for the gate value
+    if score <= VISUAL_SCORE_THRESHOLD:
         update.update({
             "discard_stage": "visual_removal_check",
             "discard_reason": "visual_removal_score_below_threshold",
@@ -270,6 +283,40 @@ def samaudio_text_remove(state: AVState) -> AVState:
 
 
 @track_node
+def samaudio_best_of_remove(state: AVState) -> AVState:
+    # Best-of-10 separation: visual(mask) + text prompts x 5 fixed seeds, all 10
+    # candidates scored with ImageBind and the winner picked by max ib_ta
+    # (tiebreak min ib_ta_res). Replaces the sequential mask-pass + text-pass:
+    # the winner's residual IS the final object-removed audio, so it lands in
+    # text_residual_audio_path, which downstream nodes already consume.
+    sample_id = state["sample_id"]
+    target_object = state.get("target_object", "unknown")
+
+    result = _get_audio_removal_model().remove_best_of(
+        av_pair_path=state.get("av_pair_path", ""),
+        target_object=target_object,
+        sample_id=sample_id,
+        mask_path=state.get("mask_path"),
+        audio_path=state.get("audio_path"),
+    )
+
+    update: AVState = {"text_residual_audio_path": result.residual_path}
+    if result.target_path:
+        update["text_target_audio_path"] = result.target_path
+    if result.method:
+        update["best_audio_method"] = result.method
+    if result.seed is not None:
+        update["best_audio_seed"] = result.seed
+    if result.ib_ta is not None:
+        update["best_audio_ib_ta"] = result.ib_ta
+    if result.ib_ta_res is not None:
+        update["best_audio_ib_ta_res"] = result.ib_ta_res
+    if result.selection_path:
+        update["audio_selection_path"] = result.selection_path
+    return update
+
+
+@track_node
 def audio_removal_check(state: AVState) -> AVState:
     score = state.get("mock_audio_removal_score", 0.90)
 
@@ -285,6 +332,25 @@ def audio_removal_check(state: AVState) -> AVState:
 
 
 @track_node
+def av_quality_enhancement(state: AVState) -> AVState:
+    # Post-processing: mux the inpainted video with the best residual audio and
+    # jointly refine BOTH modalities with the LTX-2 denoising enhancer.
+    sample_id = state["sample_id"]
+
+    result = _get_av_enhance_model().enhance(
+        inpainted_video_path=state.get("inpainted_video_path", ""),
+        residual_audio_path=state.get("text_residual_audio_path", ""),
+        sample_id=sample_id,
+        target_object=state.get("target_object", "unknown"),
+    )
+
+    return {
+        "paired_input_video_path": result.paired_input_path,
+        "enhanced_video_path": result.enhanced_path,
+    }
+
+
+@track_node
 def paired_av_output(state: AVState) -> AVState:
     sample_id = state["sample_id"]
 
@@ -292,7 +358,9 @@ def paired_av_output(state: AVState) -> AVState:
     write_text_artifact(
         output_path,
         (
-            f"mock paired AV output for sample={sample_id}\n"
+            f"paired AV output for sample={sample_id}\n"
+            f"enhanced_av={state.get('enhanced_video_path')}\n"
+            f"paired_input={state.get('paired_input_video_path')}\n"
             f"video={state.get('inpainted_video_path')}\n"
             f"audio={state.get('text_residual_audio_path')}\n"
         ),

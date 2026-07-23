@@ -15,11 +15,15 @@ Given an 8-second AV clip, the pipeline:
 3. segments it,
 4. erases it from the video (inpainting),
 5. verifies it's actually gone (re-segment + compare),
-6. removes its sound (two SAM-Audio passes),
-7. emits a "paired AV output" if every gate passed, else discards the clip.
+6. removes its sound (best-of-10 SAM-Audio separation, ImageBind-ranked),
+7. jointly refines the video+audio pair with the LTX-2 denoising enhancer,
+8. emits a "paired AV output" if every gate passed, else discards the clip.
 
 The output is `data/logs/state.jsonl` — one line per clip with all artifact
 paths and a `status` (`passed` clips are the curated set).
+
+**Showcase**: stage-by-stage examples (successes and gate rejections) at
+<https://huggingface.co/spaces/WitneyWW/av-agent-pipeline-stages>.
 
 ## Pipeline (graph)
 
@@ -42,14 +46,14 @@ paths and a `status` (`passed` clips are the curated set).
  inpainted_video_check        SAM3 re-seg ──► [removal > 80%?] ──no──► discard
    │ yes
    ▼
- samaudio_remove_target       SAM-Audio (mask-conditioned)  → residual_1, target_1
-   │
-   ▼
- samaudio_text_remove         SAM-Audio (text-conditioned)  → residual_2, target_2
-   │
+ samaudio_best_of_remove      SAM-Audio best-of-10 (visual+text × 5 seeds),
+   │                          ImageBind-ranked → best residual + target
    ▼
  audio_removal_check          ──► [audio > 80%?] ──no──► discard
    │ yes
+   ▼
+ av_quality_enhancement       LTX-2.3 22B: mux inpainted video + residual audio,
+   │                          SDEdit-refine BOTH modalities jointly
    ▼
  paired_av_output             status = passed
 ```
@@ -71,7 +75,9 @@ never touch the orchestrator.
 | object extraction | GPT-4o-mini | `avgraph` | in-process (OpenAI API) | `OPENAI_API_KEY` |
 | segmentation + removal verify | SAM3 | `sam3` | subprocess (`models/sam3_worker.py`) | GPU |
 | inpainting | EffectErase (Wan2.1-Fun-1.3B-InP + LoRA) | `effecterase` | subprocess (`models/effecterase_worker.py`) | GPU |
-| audio removal | SAM-Audio-large | `samaudio311` | subprocess (`models/sam_audio_worker.py`) | GPU |
+| audio removal | SAM-Audio-large (best-of-10) | `samaudio311` | subprocess (`models/sam_audio_worker.py --mode best_of`) | GPU |
+| audio candidate ranking | ImageBind (JavisDiT) | `javisdit` | subprocess (`models/ib_select_worker.py`) | GPU |
+| AV enhancement | LTX-2.3 22B distilled + Gemma-3-12B | LTX-2 uv venv | subprocess (`models/ltx_enhance_worker.py`) | GPU (80 GB, or `AVENHANCE_OFFLOAD_MODE=cpu`) |
 | audio check | — (mock) | `avgraph` | placeholder | — |
 
 Each `models/<x>_model.py` is a thin, stdlib-only wrapper that builds a command,
@@ -95,7 +101,9 @@ av_langgraph_pipeline/
     object_extraction_model.py
     segmentation_model.py       / sam3_worker.py      (segment + verify modes)
     inpainting_model.py         / effecterase_worker.py
-    audio_removal_model.py      / sam_audio_worker.py (mask + text modes)
+    audio_removal_model.py      / sam_audio_worker.py (mask/text/best_of modes)
+                                / ib_select_worker.py (ImageBind ranking)
+    av_enhance_model.py         / ltx_enhance_worker.py (LTX-2 joint AV enhance)
   pretrained_weight/      qwen3_omni/  sam3/  sam_audio/  inpainting/
   data/
     raw/                  input videos (bundled samples)
@@ -104,38 +112,78 @@ av_langgraph_pipeline/
   tests/                  test_1..5 (mock, CPU)
 ```
 
-## Usage
+## Using the agent on GPUs
+
+Everything heavy runs on a GPU node; the orchestrator itself is CPU-only.
+One H100/A100 (80 GB) covers every stage sequentially. A full real pass takes
+roughly 20–40 min per clip (caption ~10 min, inpaint ~10 min, best-of-10 audio
+~10 min, LTX-2 enhance ~7 min incl. the 46 GB checkpoint load).
+
+### 1. Prepare inputs (CPU, login node)
 
 ```bash
 AVPY=/home/weihan.xu/miniconda3/envs/avgraph/bin/python
 
-# 1. list every video in a folder -> input jsonl  {"video_id","video"}
+# list every video in a folder -> input jsonl  {"video_id","video"}
 $AVPY generate_inputs.py --video_dir /group2/ct/weihanx/8sec_raw_video --output inputs.jsonl
 
-# 2. extract the audio track from each video  -> inputs_preprocessed.jsonl  {..., "audio"}
+# extract the audio track from each video  -> inputs_preprocessed.jsonl  {..., "audio"}
 $AVPY preprocess.py --input_jsonl inputs.jsonl --audio_dir data/work/source_audio
-
-# 3a. mock run (CPU, login node) — sanity-check the wiring
-$AVPY run.py --input_jsonl inputs_preprocessed.jsonl
-
-# 3b. real run (GPU node) — all models live
-srun -p sharedp --gres=gpu:1 --pty bash -l
-export OPENAI_API_KEY=sk-...
-AVGRAPH_USE_REAL_MODELS=1 $AVPY run.py --input_jsonl inputs_preprocessed.jsonl
 ```
 
-`run.py` threads the video into caption/SAM3/EffectErase and the extracted audio
-into SAM-Audio.
+### 2. Sanity-check the wiring (CPU, no GPU needed)
+
+```bash
+$AVPY run.py --input_jsonl inputs_preprocessed.jsonl   # mock mode is the default
+```
+
+### 3. Real run on a GPU node
+
+Interactive:
+
+```bash
+srun -p sharedp --gres=gpu:h100:1 --pty bash -l
+export OPENAI_API_KEY=sk-...            # or pin targets, see _e2e_showcase_batch.py
+export AVGRAPH_USE_REAL_MODELS=1
+$AVPY run.py --input_jsonl inputs_preprocessed.jsonl
+```
+
+Batch via SLURM (recommended — see the `run_*.sh` scripts for ready-made
+`sbatch` templates):
+
+- `run_e2e_batch.sh <id> [<id> ...]` — full pipeline for a list of samples
+  (uses cached captions + pinned targets from `_e2e_showcase_batch.py`).
+- `run_enhance_test.sh` — the LTX-2 enhancement stage alone, on existing artifacts.
+- `run_best_of_driver_test.sh` — the best-of-10 audio stage alone.
+
+All of them log to `slurm-logs/` and print machine-parsable `SAMPLE_RESULT`
+lines.
 
 ### Mock vs. real
 
 `AVGRAPH_USE_REAL_MODELS=1` switches every node from a fast mock (stub paths /
 default scores) to its real model. Mock is the default, so the tests and a dry
-run work on a login node with no GPU. Knobs:
+run work on a login node with no GPU.
 
-- `OPENAI_API_KEY` — required for real object extraction.
-- `SAM3_FIRST_FRAME_THRESHOLD` (default `0.1`) — SAM3 first-frame gate.
-- `INPAINT_NUM_FRAMES` (default `192`) — EffectErase max frames (clamped to the largest valid `4n+1`).
+### Gate thresholds (env vars)
+
+| Var | Production | Dev runs here | Meaning |
+|---|---|---|---|
+| `SAM3_FIRST_FRAME_THRESHOLD` | 0.80 (intended) | 0.05 | first-frame fail-fast before full segmentation |
+| `MASK_AREA_THRESHOLD` | 0.15 | 0.05 | full mask must cover this frame fraction |
+| `VISUAL_SCORE_THRESHOLD` | 0.80 | 0.40 | SAM3 re-seg removal score after inpainting |
+
+Other knobs: `OPENAI_API_KEY` (real object extraction),
+`INPAINT_NUM_FRAMES` (default `192`), and the LTX-2 enhancement set
+`AVENHANCE_DENOISE_STRENGTH` (default `0.4219`, the lightest step on the
+distilled sigma grid), `AVENHANCE_AUDIO_DENOISE_STRENGTH`,
+`AVENHANCE_FINE_STEPS`, `AVENHANCE_OFFLOAD_MODE=cpu` (GPUs < 60 GB).
+
+### Running on a different host
+
+Every interpreter/weight/repo path has an env-var override
+(`SAM3_PYTHON`, `LTX_CKPT`, `AVGRAPH_FFMPEG`, …) — see `SELF_HOSTING.md` for
+the full table and per-model environment requirements.
 
 ## Output: `state.jsonl`
 
@@ -195,5 +243,6 @@ files and be concatenated.
 ## Status
 
 Real & validated: caption, object extraction, segmentation, removal-verify,
-inpainting, audio removal (both passes). Mock: `audio_removal_check` (no real
-audio verifier wired yet).
+inpainting, best-of-10 audio removal + ImageBind ranking, LTX-2 joint AV
+enhancement. Mock: `audio_removal_check` (no real audio verifier wired yet —
+quality control on audio currently comes from the ImageBind tournament).

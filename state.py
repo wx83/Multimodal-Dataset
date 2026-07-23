@@ -28,6 +28,18 @@ class AVState(TypedDict, total=False):
     text_target_audio_path: str       # text-pass isolated target sound
     audio_removal_score: float
 
+    # best-of-10 SAM-Audio selection (visual+text prompts x 5 seeds, ImageBind-ranked;
+    # the winner's residual/target land in text_{residual,target}_audio_path)
+    best_audio_method: str            # "visual" or "text"
+    best_audio_seed: int
+    best_audio_ib_ta: float           # ImageBind text<->target (higher = better)
+    best_audio_ib_ta_res: float       # ImageBind text<->residual (lower = cleaner)
+    audio_selection_path: str         # selection.json with all candidate scores
+
+    # LTX-2 joint AV denoising enhancement (post-processing)
+    paired_input_video_path: str      # conformed mux of inpainted video + residual audio
+    enhanced_video_path: str          # LTX-2 enhanced AV mp4 (video+audio)
+
     # final output
     paired_av_output_path: str
 

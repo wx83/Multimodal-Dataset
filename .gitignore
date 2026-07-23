@@ -19,3 +19,13 @@ venv/
 # --- Editor / OS ---
 .DS_Store
 *.swp
+Untitled
+
+# --- Secrets (never commit) ---
+.openai_key
+
+# --- SLURM job logs ---
+slurm-logs/
+
+# --- HF showcase media (published on the Space, too heavy for git) ---
+hf_showcase/media/

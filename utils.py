@@ -41,6 +41,9 @@ def build_state_record(state: Dict[str, Any]) -> Dict[str, Any]:
         "mask_target_audio_path": state.get("mask_target_audio_path"),
         "text_residual_audio_path": state.get("text_residual_audio_path"),
         "text_target_audio_path": state.get("text_target_audio_path"),
+        # LTX-2 joint AV denoising enhancement
+        "paired_input_video_path": state.get("paired_input_video_path"),
+        "enhanced_video_path": state.get("enhanced_video_path"),
         "paired_av_output_path": state.get("paired_av_output_path"),
         "status": state.get("status"),
         "discard_stage": state.get("discard_stage"),
