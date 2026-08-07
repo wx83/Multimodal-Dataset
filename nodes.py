@@ -40,9 +40,21 @@ QWEN3_OMNI_PATH = os.environ.get(
 
 # SAM3 first-frame mask gate (fraction of the frame the object must cover to
 # proceed to whole-video segmentation).
-# TEMP: 0.1 for development so real videos pass; set back to 0.80 later
-# (or override with the SAM3_FIRST_FRAME_THRESHOLD env var).
+# The intended production value is 0.80; the default below is still the
+# development value (0.1) that was left in so real videos would pass. Default
+# left unchanged here on purpose — flipping it silently would change what every
+# existing run accepts. Instead it now announces itself, so a relaxed gate can
+# never again look like a normal run in the logs.
+SAM3_FIRST_FRAME_INTENDED = 0.80
 SAM3_FIRST_FRAME_THRESHOLD = float(os.environ.get("SAM3_FIRST_FRAME_THRESHOLD", "0.1"))
+if SAM3_FIRST_FRAME_THRESHOLD < SAM3_FIRST_FRAME_INTENDED:
+    print(
+        f"[gate] WARNING: SAM3 first-frame gate is RELAXED "
+        f"({SAM3_FIRST_FRAME_THRESHOLD} < intended {SAM3_FIRST_FRAME_INTENDED}). "
+        f"Results are not production-grade. "
+        f"Set SAM3_FIRST_FRAME_THRESHOLD={SAM3_FIRST_FRAME_INTENDED} for real runs.",
+        flush=True,
+    )
 
 # EffectErase max frames to inpaint (clamped to the largest valid 4n+1 that fits
 # the mask/fg_bg). 192 ≈ full 8s clip at 24fps -> the worker uses 189.
@@ -322,7 +334,8 @@ def audio_removal_check(state: AVState) -> AVState:
 
     update: AVState = {"audio_removal_score": score}
 
-    if score <= 0.80:
+    from routes import AUDIO_SCORE_THRESHOLD  # single source for the gate value
+    if score <= AUDIO_SCORE_THRESHOLD:
         update.update({
             "discard_stage": "audio_removal_check",
             "discard_reason": "audio_removal_score_below_threshold",
