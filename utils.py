@@ -34,6 +34,12 @@ def build_state_record(state: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "video_id": state.get("sample_id"),
         "object_name": state.get("target_object"),
+        # 2026-08-30: caption 与 sounding_objects 原本都没落盘。后果是 8907 条历史运行
+        # （约 1484 GPU-小时的 caption）无法复用，任何「换个 prompt 会怎样」的对照
+        # 都必须重新生成 caption；而 sounding_objects 缺失使得「同一条片子里是否本来
+        # 就有可分割的备选发声物体」这个问题在历史数据上无法回答。两者都近乎零成本。
+        "caption": state.get("caption"),
+        "sounding_objects": state.get("sounding_objects"),
         "mask_path": state.get("mask_path"),
         "inpainted_video_path": state.get("inpainted_video_path"),
         # SAM-Audio: mask-pass then text-pass (all four kept)
@@ -50,6 +56,15 @@ def build_state_record(state: Dict[str, Any]) -> Dict[str, Any]:
         "discard_reason": state.get("discard_reason"),
         "metrics": {
             "mask_area_ratio": state.get("mask_area_ratio"),
+            # 2026-08-30: first_frame_ratio 之前没落盘，而 segmentation_model.py 在
+            # 首帧比例低于门槛时会把 mask_area_ratio 硬写成 0.0（真实值只留在
+            # first_frame_ratio）。后果是历史 8907 条里 4789 条记为 mask=0，
+            # 看上去像「SAM3 完全没检出」，实际是「检出了但低于门槛被抹零」——
+            # 两者对应完全不同的修法（换目标 vs 调门槛），而数据无法区分。
+            "first_frame_ratio": state.get("first_frame_ratio"),
+            # 实例数同样要落盘：不落就无法回测「加多实例闸会损失多少交付量」，
+            # 而这正是 S23 只能靠重跑 80 条 SAM3 才量出 8.8% 的原因。
+            "n_instances": state.get("n_instances"),
             "visual_removal_score": state.get("visual_removal_score"),
             "audio_removal_score": state.get("audio_removal_score"),
         },

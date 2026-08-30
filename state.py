@@ -16,6 +16,8 @@ class AVState(TypedDict, total=False):
     # segmentation
     mask_path: str
     mask_area_ratio: float
+    first_frame_ratio: float   # 首帧比例原值；低于门槛时 mask_area_ratio 会被抹成 0，只有这里保留真值
+    n_instances: int           # SAM3 首帧检出的实例数；>1 意味着两侧删的可能不是同一个物体
 
     # video branch
     inpainted_video_path: str

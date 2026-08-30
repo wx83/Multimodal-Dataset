@@ -40,6 +40,8 @@ class SegmentationResult:
     mask_path: str | None
     mask_area_ratio: float
     first_frame_ratio: float | None = None
+    # SAM3 在首帧检出的实例数。None = mock 路径或旧 worker（无此字段），不是 0。
+    n_instances: int | None = None
     discard_reason: str | None = None
 
 
@@ -106,16 +108,20 @@ class SegmentationModel:
             data = self._run(cmd)
 
         ratio = float(data.get("first_frame_ratio", 0.0))
+        n_inst = data.get("n_instances")
+        n_inst = int(n_inst) if n_inst is not None else None
         if data.get("passed"):
             return SegmentationResult(
                 mask_path=data.get("mask_path"),
                 mask_area_ratio=ratio,
                 first_frame_ratio=ratio,
+                n_instances=n_inst,
             )
         return SegmentationResult(
             mask_path=None,
             mask_area_ratio=0.0,
             first_frame_ratio=ratio,
+            n_instances=n_inst,
             discard_reason="first_frame_mask_below_threshold",
         )
 

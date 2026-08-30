@@ -194,6 +194,9 @@ def target_object_segmentation(state: AVState) -> AVState:
     update: AVState = {
         "mask_path": result.mask_path or "",
         "mask_area_ratio": result.mask_area_ratio,
+        # 保留首帧比例原值：低于门槛时上面那个会被抹成 0，真值只在这里
+        "first_frame_ratio": result.first_frame_ratio,
+        "n_instances": result.n_instances,
     }
 
     if result.discard_reason:

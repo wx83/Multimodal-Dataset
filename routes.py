@@ -19,10 +19,21 @@ def route_after_object_extraction(state: AVState) -> Literal["continue", "discar
     return "continue"
 
 
+# 多实例一致性闸。默认**关闭**——打开会减少交付量，该由人决定，不该静默生效。
+# 依据：视觉侧只取 masks[0]（sam3_worker.py），音频侧 SAM-Audio 按文本分离全部实例。
+# 词指向多个物体时两侧删的不是同一个，违反「两侧移除同一物体」这条 correctness 约束。
+# 实测已交付的 1945 条里约 8.8% 命中（7/80 抽样，95%CI 4.3-17.0）。
+REQUIRE_SINGLE_INSTANCE = os.environ.get("REQUIRE_SINGLE_INSTANCE", "0") == "1"
+
+
 def route_after_mask_check(state: AVState) -> Literal["continue", "discard"]:
-    if state.get("mask_area_ratio", 0.0) > MASK_AREA_THRESHOLD:
-        return "continue"
-    return "discard"
+    if state.get("mask_area_ratio", 0.0) <= MASK_AREA_THRESHOLD:
+        return "discard"
+    # None = mock 或旧 worker 没上报，此时不拦（缺数据不等于单实例，但也不该凭空丢样本）
+    n = state.get("n_instances")
+    if REQUIRE_SINGLE_INSTANCE and n is not None and n > 1:
+        return "discard"
+    return "continue"
 
 
 def route_after_visual_check(state: AVState) -> Literal["continue", "discard"]:
