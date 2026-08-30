@@ -333,6 +333,17 @@ def samaudio_best_of_remove(state: AVState) -> AVState:
 
 @track_node
 def audio_removal_check(state: AVState) -> AVState:
+    # ⚠ 这道闸是桩，不是检查。与上面的 inpainted_video_check 对照即可看出：
+    # 视觉侧有 _use_real_models() 分支、真的调 SAM3 verify_removal；
+    # 这里只读一个 **mock_** 字段，从不调用任何模型。
+    #
+    # 历史数据的后果（8907 条真实运行）：到达此闸的 1946 条里，
+    # audio_removal_score 只有 2 个取值——1945 条恰好是下面这个默认值 0.90，
+    # 另 1 条 0.55 来自显式覆盖。对照 visual_removal_score 有 693 个不同取值。
+    # 也就是说**音频侧从未被验证过，一条都没有**，"四道质量闸"实为三道加一个桩。
+    #
+    # 这也解释了多实例不一致为何一直无人发现：唯一可能发现它的东西不存在。
+    # 要真正实现：参照 verify_removal 的形状，对残余音频重跑分离并比较能量。
     score = state.get("mock_audio_removal_score", 0.90)
 
     update: AVState = {"audio_removal_score": score}
