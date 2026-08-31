@@ -19,7 +19,13 @@ import argparse
 import json
 import sys
 
-from transformers import Qwen3OmniMoeForConditionalGeneration, Qwen3OmniMoeProcessor
+import transformers
+
+# 模型类不再写死。换 captioner 是这套架构的卖点之一（"他们可以自己换 model"），
+# 而写死类名会让换模型必须改代码——传 Qwen2.5-Omni 的 checkpoint 给 Qwen3 的 MoE 类
+# 只会加载失败。改成按名字解析，换模型只需多传两个参数。
+DEFAULT_MODEL_CLASS = "Qwen3OmniMoeForConditionalGeneration"
+DEFAULT_PROCESSOR_CLASS = "Qwen3OmniMoeProcessor"
 from qwen_omni_utils import process_mm_info
 
 RESULT_MARKER = "QWEN3_OMNI_RESULT "
@@ -36,14 +42,28 @@ Rules:
 """
 
 
-def load(model_name: str, attn_implementation: str):
-    model = Qwen3OmniMoeForConditionalGeneration.from_pretrained(
+def _resolve(class_name: str):
+    """按名字从 transformers 取类。取不到就当场报清楚，别等到 from_pretrained 才炸。"""
+    cls = getattr(transformers, class_name, None)
+    if cls is None:
+        raise SystemExit(
+            f"transformers {transformers.__version__} 里没有 {class_name}。\n"
+            f"  换模型时 --model_class / --processor_class 要与 checkpoint 匹配，"
+            f"且当前 transformers 版本要支持该模型。"
+        )
+    return cls
+
+
+def load(model_name: str, attn_implementation: str,
+         model_class: str = DEFAULT_MODEL_CLASS,
+         processor_class: str = DEFAULT_PROCESSOR_CLASS):
+    model = _resolve(model_class).from_pretrained(
         model_name,
         dtype="auto",
         device_map="auto",
         attn_implementation=attn_implementation,
     )
-    processor = Qwen3OmniMoeProcessor.from_pretrained(model_name, use_fast=False)
+    processor = _resolve(processor_class).from_pretrained(model_name, use_fast=False)
     return model, processor
 
 
@@ -110,14 +130,22 @@ def main():
                     help="Use the audio embedded in the video (critical for AV captions).")
     ap.add_argument("--no_audio_in_video", dest="use_audio_in_video", action="store_false")
     ap.add_argument("--out", default=None, help="Optional path to write the JSON result.")
+    ap.add_argument("--model_class", default=DEFAULT_MODEL_CLASS,
+                    help="transformers 里的模型类名。换 captioner 时必须与 checkpoint 匹配"
+                         "（Qwen2.5-Omni 与 Qwen3-Omni 不是同一套类）。")
+    ap.add_argument("--processor_class", default=DEFAULT_PROCESSOR_CLASS,
+                    help="transformers 里的 processor 类名，同上。")
     args = ap.parse_args()
 
-    model, processor = load(args.model, args.attn_implementation)
+    model, processor = load(args.model, args.attn_implementation,
+                            args.model_class, args.processor_class)
     caption = caption_video(
         model, processor, args.video, args.max_new_tokens, args.use_audio_in_video
     )
 
-    result = {"caption": caption, "video": args.video, "model": args.model}
+    # 记下用的是哪个模型和哪个类：换模型做对比时，没有这个就无法事后区分两次运行
+    result = {"caption": caption, "video": args.video, "model": args.model,
+              "model_class": args.model_class}
     if args.out:
         with open(args.out, "w", encoding="utf-8") as f:
             json.dump(result, f, ensure_ascii=False)
