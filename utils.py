@@ -56,6 +56,16 @@ def effective_config() -> Dict[str, Any]:
         import nodes
         cfg["sam3_first_frame_threshold"] = nodes.SAM3_FIRST_FRAME_THRESHOLD
         cfg["sam3_first_frame_intended"] = nodes.SAM3_FIRST_FRAME_INTENDED
+        # 哪几道闸真的在测量。一道读常数的闸和一道真检查的闸在通过率上长得一样，
+        # 不标出来就无法区分「音频侧合格」与「音频侧根本没测」。
+        # cross_modal 那道在 models/__init__.py 里被声明为最后一道闸，但从未接进图，
+        # 于是「两侧必须移除同一物体」这条 correctness 约束目前无人执行。
+        cfg["gates_measuring"] = {
+            "mask": True,
+            "visual": True,
+            "audio": nodes.AUDIO_SCORE_IS_MEASURED,
+            "cross_modal": False,
+        }
         # 闸被放宽时显式标记，免得开发档的运行事后看起来像正常运行
         cfg["gate_relaxed"] = (
             nodes.SAM3_FIRST_FRAME_THRESHOLD < nodes.SAM3_FIRST_FRAME_INTENDED)
@@ -112,6 +122,8 @@ def build_state_record(state: Dict[str, Any]) -> Dict[str, Any]:
             "n_instances": state.get("n_instances"),
             "visual_removal_score": state.get("visual_removal_score"),
             "audio_removal_score": state.get("audio_removal_score"),
+            # 分数是否为实测。缺这一位，下游就无法区分「合格」与「没测」。
+            "audio_score_measured": state.get("audio_score_measured"),
         },
         # 生效配置随每条记录落盘。没有它，两次运行的通过率不可比——见 effective_config 的注释。
         "config": effective_config(),

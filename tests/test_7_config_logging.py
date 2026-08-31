@@ -24,6 +24,7 @@ REQUIRED = [
     "sam3_first_frame_threshold",
     "sam3_first_frame_intended",
     "gate_relaxed",
+    "gates_measuring",
     "caption_model",
     "extraction_model",
 ]
@@ -60,6 +61,32 @@ def test_relaxed_gate_is_flagged():
     cfg = effective_config()
     expected = nodes.SAM3_FIRST_FRAME_THRESHOLD < nodes.SAM3_FIRST_FRAME_INTENDED
     assert cfg["gate_relaxed"] is expected
+
+
+def test_gates_measuring_is_honest():
+    """「哪几道闸真的在测量」必须如实上报。
+
+    一道读常数的闸和一道真检查的闸，在通过率上长得完全一样——历史 8907 条
+    正是这样：音频闸拒了 1 条，看起来像「音频侧几乎都合格」，实际是分数从未测量。
+    """
+    import nodes
+    g = effective_config()["gates_measuring"]
+    assert set(g) == {"mask", "visual", "audio", "cross_modal"}
+    assert g["audio"] is nodes.AUDIO_SCORE_IS_MEASURED
+    # cross_modal 在 models/__init__.py 里被声明为最后一道闸，但从未接进图。
+    # 这条断言会在它真正接线那天失败——那正是提醒改这里的时机。
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    wiring = open(os.path.join(root, "main.py")).read() + open(
+        os.path.join(root, "nodes.py")).read()
+    assert "CrossModalChecker" not in wiring, \
+        "cross_modal 闸似乎已接进图，请把 gates_measuring 里的 False 改掉"
+
+
+def test_audio_score_carries_measured_flag():
+    from utils import build_state_record
+    rec = build_state_record({"sample_id": "t", "audio_removal_score": 0.9,
+                              "audio_score_measured": False})
+    assert rec["metrics"]["audio_score_measured"] is False
 
 
 def test_record_carries_config():
