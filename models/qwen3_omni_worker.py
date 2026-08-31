@@ -24,6 +24,12 @@ import transformers
 # 模型类不再写死。换 captioner 是这套架构的卖点之一（"他们可以自己换 model"），
 # 而写死类名会让换模型必须改代码——传 Qwen2.5-Omni 的 checkpoint 给 Qwen3 的 MoE 类
 # 只会加载失败。改成按名字解析，换模型只需多传两个参数。
+#
+# **但这只解开一处耦合，不等于 captioner 可以随便换。** caption_video() 里还有
+# 两处 Qwen-Omni 家族特有的东西：process_mm_info（来自 qwen_omni_utils），
+# 以及 generate 的 thinker_return_dict_in_generate / return_audio 参数（thinker-talker
+# 双头架构特有）。Qwen2.5-Omni 同属该家族，大概率能跑但未在真机验证过；
+# 换到非 Qwen 的 omni 模型必须写新 worker。换模型的完整说明见 WORKER_CONTRACT.md。
 DEFAULT_MODEL_CLASS = "Qwen3OmniMoeForConditionalGeneration"
 DEFAULT_PROCESSOR_CLASS = "Qwen3OmniMoeProcessor"
 from qwen_omni_utils import process_mm_info
