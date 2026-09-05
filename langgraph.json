@@ -1,0 +1,6 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "avgraph": "./main.py:build_graph"
+  }
+}
