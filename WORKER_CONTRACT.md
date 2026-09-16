@@ -21,8 +21,14 @@
 | 兜底 | 同时把 `<NAME>_RESULT {json}` 打到 stdout 一行 |
 | 解析 | wrapper 先读文件，读不到再从 stdout 找 marker 行，都失败才报错并附 stdout 末尾 2000 字 |
 
-现有的七个 marker：`QWEN3_OMNI_RESULT`、`SAM3_RESULT`、`SAM_AUDIO_RESULT`、
-`EFFECTERASE_RESULT`、`LTX_ENHANCE_RESULT`、`IB_SELECT_RESULT`、`CLAP_SELECT_RESULT`。
+现有的八个 marker：`QWEN3_OMNI_RESULT`、`SAM3_RESULT`、`SAM_AUDIO_RESULT`、
+`EFFECTERASE_RESULT`、`LTX_ENHANCE_RESULT`、`IB_SELECT_RESULT`、`CLAP_SELECT_RESULT`、
+`ACOUSTIC_DESC_RESULT`。
+
+`ACOUSTIC_DESC_RESULT`（`acoustic_desc_worker.py`，由 `ACOUSTIC_DESC=clap` 启用，默认 off）在抽取
+节点之后给目标一个**声学描述**（原始音频的 CLAP 零样本标签，如 `footsteps`），`AUDIO_TEXT=acoustic`
+时音频侧三处（分离 prompt / best-of 选优 / 检查）改用它，视觉侧不变。为什么：已交付人物类样本
+90% 无人声，在响的是同一个人的动作声，用 `man` 提示音频侧拿不到信号（strategy-lab S55/S56/S59）。
 
 其中 `IB_SELECT_RESULT` 与 `CLAP_SELECT_RESULT` 是同一个阶段（best-of 选优）的两个可换
 选优器，由 `BESTOF_SELECTOR=ib|clap` 切换，默认 `ib`（历史行为逐位不变）。

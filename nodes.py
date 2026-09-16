@@ -9,6 +9,7 @@ from models import (
     ObjectExtractionModel,
     SegmentationModel,
 )
+from models.acoustic_desc_model import AcousticDescModel
 from state import AVState
 from utils import (
     append_state_jsonl,
@@ -75,6 +76,22 @@ if not AUDIO_SCORE_IS_MEASURED:
 # the mask/fg_bg). 192 ≈ full 8s clip at 24fps -> the worker uses 189.
 INPAINT_NUM_FRAMES = int(os.environ.get("INPAINT_NUM_FRAMES", "192"))
 
+# 目标的声学描述（strategy-lab S49–S59）。抽取节点只给一个视觉名词 target_object；
+# 已交付人物类样本 90% 的音频里没有人声，在响的是脚步/开门/餐具——同一个人的动作声。
+# 用 "man" 去提示分离器和打分器拿不到任何信号（AUC 0.496），用声学标签可以（0.634）。
+#   ACOUSTIC_DESC = off | clap   抽取节点是否额外产出 acoustic_desc（clap = 原始音频零样本，不需要 caption）
+#   AUDIO_TEXT    = object | acoustic   音频侧三处（分离 prompt / 选优 / 检查）用哪个文本
+# 两个都默认关：历史行为逐位不变。视觉侧永远用 target_object，所以「两侧移除同一物体」不变。
+ACOUSTIC_DESC = os.environ.get("ACOUSTIC_DESC", "off")
+AUDIO_TEXT = os.environ.get("AUDIO_TEXT", "object")
+if ACOUSTIC_DESC not in ("off", "clap"):
+    raise ValueError(f"ACOUSTIC_DESC must be 'off' or 'clap', got {ACOUSTIC_DESC!r}")
+if AUDIO_TEXT not in ("object", "acoustic"):
+    raise ValueError(f"AUDIO_TEXT must be 'object' or 'acoustic', got {AUDIO_TEXT!r}")
+if AUDIO_TEXT == "acoustic" and ACOUSTIC_DESC == "off":
+    print("[config] WARNING: AUDIO_TEXT=acoustic but ACOUSTIC_DESC=off — no acoustic_desc will be "
+          "produced, so the audio side falls back to target_object.", flush=True)
+
 
 def _use_real_models() -> bool:
     return os.environ.get("AVGRAPH_USE_REAL_MODELS") == "1"
@@ -119,6 +136,20 @@ def _get_audio_removal_model() -> AudioRemovalModel:
     (object-removed) audio.
     """
     return AudioRemovalModel(mock=not _use_real_models())
+
+
+@lru_cache(maxsize=1)
+def _get_acoustic_desc_model() -> AcousticDescModel:
+    """Acoustic describer: real CLAP zero-shot (subprocess) when enabled, else mock."""
+    return AcousticDescModel(mock=not _use_real_models())
+
+
+def _audio_text(state: AVState) -> str:
+    """The text the audio side works with. AUDIO_TEXT=acoustic uses acoustic_desc when
+    the extraction node produced one; otherwise (and always for object) target_object."""
+    if AUDIO_TEXT == "acoustic" and state.get("acoustic_desc"):
+        return state["acoustic_desc"]
+    return state.get("target_object", "unknown")
 
 
 @lru_cache(maxsize=1)
@@ -188,10 +219,26 @@ def sounding_object_extraction(state: AVState) -> AVState:
             "discard_reason": "no_sounding_object_found",
         }
 
-    return {
+    update: AVState = {
         "sounding_objects": objects,
         "target_object": objects[0],
     }
+    if ACOUSTIC_DESC != "off":
+        # 声学描述从原始音频来，不依赖 caption；失败不拖垮 pipeline，只是没有描述。
+        try:
+            r = _get_acoustic_desc_model().describe(
+                state.get("audio_path") or state.get("av_pair_path", ""),
+                mock_label=state.get("mock_acoustic_desc"),
+            )
+            update.update({
+                "acoustic_desc": r.acoustic_desc,
+                "acoustic_desc_score": r.score,
+                "acoustic_desc_source": r.source,
+            })
+        except Exception as e:
+            print(f"[acoustic_desc] WARNING: {type(e).__name__}: {e} — falling back to target_object",
+                  flush=True)
+    return update
 
 
 @track_node
@@ -276,7 +323,7 @@ def inpainted_video_check(state: AVState) -> AVState:
 @track_node
 def samaudio_remove_target(state: AVState) -> AVState:
     sample_id = state["sample_id"]
-    target_object = state.get("target_object", "unknown")
+    target_object = _audio_text(state)
 
     result = _get_audio_removal_model().remove(
         av_pair_path=state.get("av_pair_path", ""),
@@ -298,7 +345,7 @@ def samaudio_text_remove(state: AVState) -> AVState:
     # remove any remaining target sound by description. Its residual is the FINAL
     # object-removed audio; all four SAM-Audio paths are kept in state.
     sample_id = state["sample_id"]
-    target_object = state.get("target_object", "unknown")
+    target_object = _audio_text(state)
 
     result = _get_audio_removal_model().remove_by_text(
         input_audio=state.get("mask_residual_audio_path", ""),
@@ -320,7 +367,9 @@ def samaudio_best_of_remove(state: AVState) -> AVState:
     # the winner's residual IS the final object-removed audio, so it lands in
     # text_residual_audio_path, which downstream nodes already consume.
     sample_id = state["sample_id"]
-    target_object = state.get("target_object", "unknown")
+    # 音频侧的文本：AUDIO_TEXT=acoustic 时用 acoustic_desc（如 "footsteps"），
+    # 视觉 mask 仍来自 target_object 的分割，所以两侧指的还是同一个物体。
+    target_object = _audio_text(state)
 
     result = _get_audio_removal_model().remove_best_of(
         av_pair_path=state.get("av_pair_path", ""),

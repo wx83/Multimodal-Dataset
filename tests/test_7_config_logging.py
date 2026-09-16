@@ -27,6 +27,8 @@ REQUIRED = [
     "gates_measuring",
     "caption_model",
     "extraction_model",
+    "acoustic_desc",
+    "audio_text_source",
 ]
 
 

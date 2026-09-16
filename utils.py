@@ -69,6 +69,10 @@ def effective_config() -> Dict[str, Any]:
         # 闸被放宽时显式标记，免得开发档的运行事后看起来像正常运行
         cfg["gate_relaxed"] = (
             nodes.SAM3_FIRST_FRAME_THRESHOLD < nodes.SAM3_FIRST_FRAME_INTENDED)
+        # 音频侧用什么文本：object = target_object（历史行为），acoustic = acoustic_desc。
+        # 两次运行若这一项不同，音频侧的任何指标都不可比（S56：AUC 0.496 vs 0.634）。
+        cfg["acoustic_desc"] = nodes.ACOUSTIC_DESC
+        cfg["audio_text_source"] = nodes.AUDIO_TEXT
     except Exception as e:
         cfg["nodes_error"] = f"{type(e).__name__}: {e}"
     try:
@@ -95,6 +99,10 @@ def build_state_record(state: Dict[str, Any]) -> Dict[str, Any]:
         # 就有可分割的备选发声物体」这个问题在历史数据上无法回答。两者都近乎零成本。
         "caption": state.get("caption"),
         "sounding_objects": state.get("sounding_objects"),
+        # 目标声的声学描述（S55/S56）：object_name 是视觉名词，音频侧真正对照的文本在这里
+        "acoustic_desc": state.get("acoustic_desc"),
+        "acoustic_desc_score": state.get("acoustic_desc_score"),
+        "acoustic_desc_source": state.get("acoustic_desc_source"),
         "mask_path": state.get("mask_path"),
         "inpainted_video_path": state.get("inpainted_video_path"),
         # SAM-Audio: mask-pass then text-pass (all four kept)

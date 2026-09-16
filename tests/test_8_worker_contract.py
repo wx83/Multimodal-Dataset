@@ -33,6 +33,7 @@ PAIRS = {
     "ltx_enhance_worker.py": "av_enhance_model.py",
     "ib_select_worker.py": "audio_removal_model.py",
     "clap_select_worker.py": "audio_removal_model.py",
+    "acoustic_desc_worker.py": "acoustic_desc_model.py",
 }
 
 

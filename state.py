@@ -12,6 +12,11 @@ class AVState(TypedDict, total=False):
     caption_path: str
     sounding_objects: List[str]
     target_object: str
+    # 目标的声学描述（同一物体的声音，如 "footsteps"），供音频侧使用；视觉侧仍用 target_object。
+    # 来源：ACOUSTIC_DESC=clap 时由原始音频的 CLAP 零样本标签给出（strategy-lab S55/S56）。
+    acoustic_desc: str
+    acoustic_desc_score: float
+    acoustic_desc_source: str
 
     # segmentation
     mask_path: str
@@ -50,6 +55,7 @@ class AVState(TypedDict, total=False):
     mock_visual_removal_score: float
     mock_audio_removal_score: float
     mock_caption: str
+    mock_acoustic_desc: str
 
     # control
     retry_count: int
