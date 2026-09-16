@@ -41,6 +41,10 @@ DEFAULT_BEST_OF_SEEDS = (1132891577, 1778986134, 240868205, 1453635084, 13355220
 # Default stays "ib" so every existing run is reproduced bit-for-bit; flip it
 # per run once an A/B on fresh generations says so.
 DEFAULT_BESTOF_SELECTOR = os.environ.get("BESTOF_SELECTOR", "ib")
+# Text the clap selector scores against: "object" = object_name (the prompt),
+# "acoustic" = CLAP zero-shot label of what is actually sounding in the clip.
+# Only the acoustic text has signal on person-class samples (strategy-lab S56).
+DEFAULT_BESTOF_TEXT = os.environ.get("BESTOF_TEXT", "object")
 CLAP_SELECT_WORKER = Path(__file__).resolve().parent / "clap_select_worker.py"
 DEFAULT_CLAP_SELECT_PYTHON = os.environ.get("CLAP_SELECT_PYTHON", sys.executable)
 RESULT_MARKER = "SAM_AUDIO_RESULT "
@@ -60,6 +64,7 @@ class AudioRemovalResult:
     selection_path: str | None = None
     selector: str | None = None     # "ib" | "clap" — which rule picked the winner
     clap_removal: float | None = None  # CLAP s_mix - s_res of the winner (clap selector only)
+    text_used: str | None = None    # text the clap selector scored against (object_name or acoustic label)
 
 
 class AudioRemovalModel:
@@ -81,10 +86,14 @@ class AudioRemovalModel:
         selector: str = DEFAULT_BESTOF_SELECTOR,
         clap_select_python: str = DEFAULT_CLAP_SELECT_PYTHON,
         clap_select_worker: str = str(CLAP_SELECT_WORKER),
+        bestof_text: str = DEFAULT_BESTOF_TEXT,
     ):
         if selector not in ("ib", "clap"):
             raise ValueError(f"BESTOF_SELECTOR must be 'ib' or 'clap', got {selector!r}")
+        if bestof_text not in ("object", "acoustic"):
+            raise ValueError(f"BESTOF_TEXT must be 'object' or 'acoustic', got {bestof_text!r}")
         self.selector = selector
+        self.bestof_text = bestof_text
         self.clap_select_python = clap_select_python
         self.clap_select_worker = clap_select_worker
         self.model_dir = model_dir
@@ -228,6 +237,7 @@ class AudioRemovalModel:
             self.clap_select_python, self.clap_select_worker,
             "--candidates", os.path.join(out_dir, "candidates.json"),
             "--out", selection_path,
+            "--text-source", self.bestof_text,
         ]
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=self.timeout)
         if proc.returncode != 0:
@@ -246,6 +256,7 @@ class AudioRemovalModel:
             selection_path=selection_path,
             selector="clap",
             clap_removal=best.get("clap_removal"),
+            text_used=data.get("text_used"),
         )
 
     def _subprocess_env(self) -> dict:

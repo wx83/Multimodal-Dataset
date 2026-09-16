@@ -36,6 +36,42 @@ DEFAULT_CKPT = os.environ.get("CLAP_CKPT", "/scratch/weihan/630k-audioset-best.p
 DEFAULT_TEMPLATE = "the sound of {}"
 DEFAULT_MIN_RESIDUAL_ENERGY = 0.3
 
+# --text-source acoustic: score candidates against what is actually sounding in
+# the clip instead of the visual object_name. Motivation (strategy-lab S55/S56):
+# 90% of delivered person-class samples contain no speech; the sound present is
+# footsteps / door closing / dishes — the person's ACTIONS. With "the sound of
+# man" CLAP has no signal (AUC 0.496); with the zero-shot label it does (0.634).
+# The label is picked by CLAP over this table on the mix (target + residual of
+# any candidate — all candidates share the same mix). Same table as S55.
+ACOUSTIC_LABELS = [
+    "speech", "a man speaking", "a woman speaking", "a child speaking", "people talking", "shouting",
+    "laughter", "crying", "whispering", "breathing", "coughing", "singing", "humming", "cheering crowd",
+    "music", "guitar", "piano", "drums", "violin", "electronic music", "hip hop music", "orchestra",
+    "background music", "a song", "bass guitar", "flute", "trumpet",
+    "car engine", "car passing by", "motorcycle", "truck", "bus", "train", "airplane", "helicopter",
+    "boat engine", "bicycle", "siren", "car horn", "tires screeching", "traffic noise", "subway",
+    "engine idling", "power drill", "chainsaw", "lawn mower", "blender", "vacuum cleaner", "fan",
+    "sewing machine", "printer", "generator", "hair dryer", "washing machine", "air conditioner",
+    "electric motor", "hammering", "sawing wood",
+    "dog barking", "cat meowing", "bird chirping", "horse neighing", "cow mooing", "rooster crowing",
+    "insects buzzing", "frog croaking", "lion roaring", "pig oinking", "sheep bleating", "duck quacking", "crickets",
+    "door closing", "door knocking", "keyboard typing", "dishes clinking", "water tap running",
+    "toilet flushing", "microwave beeping", "clock ticking", "footsteps", "chair scraping",
+    "zipper", "paper rustling", "cutlery", "glass clinking", "phone ringing", "camera shutter",
+    "wind", "rain", "thunder", "stream of water", "ocean waves", "fire crackling", "crowd noise",
+    "restaurant ambience", "city street ambience", "forest ambience", "birds in the distance",
+    "water splashing", "wind blowing through trees",
+    "ball bouncing", "gunshot", "explosion", "fireworks", "hammer hitting metal", "glass breaking",
+    "clapping", "drum hit", "object falling", "punch", "slap", "knocking on wood",
+    "silence", "white noise", "static noise", "room tone", "low hum",
+]
+
+
+def pick_acoustic_label(sims, labels=ACOUSTIC_LABELS):
+    """Pure: index of the best-scoring label. Kept separate so it is testable without torch."""
+    best = max(range(len(labels)), key=lambda i: sims[i])
+    return labels[best], float(sims[best])
+
 
 def rank_candidates(rows, min_residual_energy=DEFAULT_MIN_RESIDUAL_ENERGY):
     """Pure ranking rule. Each row needs clap_removal, residual_energy, s_target.
@@ -51,7 +87,8 @@ def rank_candidates(rows, min_residual_energy=DEFAULT_MIN_RESIDUAL_ENERGY):
     return sorted(rows, key=key)
 
 
-def _score(rows, text, ckpt, template, device):
+def _score(rows, text, ckpt, template, device, text_source="object"):
+    """Returns (rows with scores, text actually used, zero-shot label score or None)."""
     import numpy as np
     import soundfile as sf
     import torch
@@ -76,6 +113,19 @@ def _score(rows, text, ckpt, template, device):
         x, _ = sf.read(p, dtype="float32")
         return x.mean(axis=1) if x.ndim > 1 else x
 
+    label_score = None
+    if text_source == "acoustic":
+        # 所有候选共享同一段混合音；用第一个候选的 target + residual 重建
+        tg0, rs0 = wav(rows[0]["target_wav"]), wav(rows[0]["residual_wav"])
+        n0 = min(len(tg0), len(rs0))
+        mix0 = np.clip(tg0[:n0] + rs0[:n0], -1.0, 1.0)
+        with torch.no_grad():
+            lemb = l2n(np.asarray(model.get_text_embedding(
+                [template.format(l) for l in ACOUSTIC_LABELS], use_tensor=False)))
+            memb = l2n(np.asarray(model.get_audio_embedding_from_data(
+                x=mix0[None, :].astype(np.float32), use_tensor=False)))[0]
+        text, label_score = pick_acoustic_label(memb @ lemb.T)
+
     with torch.no_grad():
         temb = l2n(np.asarray(model.get_text_embedding([template.format(text)], use_tensor=False)))[0]
     for r in rows:
@@ -90,7 +140,7 @@ def _score(rows, text, ckpt, template, device):
         r["s_mix"], r["s_target"], r["s_res"] = float(s[0]), float(s[1]), float(s[2])
         r["clap_removal"] = r["s_mix"] - r["s_res"]
         r["residual_energy"] = rms(rs) / max(rms(mix), 1e-9)
-    return rows
+    return rows, text, label_score
 
 
 def main():
@@ -102,6 +152,9 @@ def main():
     ap.add_argument("--ckpt", default=DEFAULT_CKPT)
     ap.add_argument("--template", default=DEFAULT_TEMPLATE)
     ap.add_argument("--min-residual-energy", type=float, default=DEFAULT_MIN_RESIDUAL_ENERGY)
+    ap.add_argument("--text-source", choices=["object", "acoustic"], default="object",
+                    help="object: score against the prompt (object_name); "
+                         "acoustic: against the CLAP zero-shot label of what is sounding in the mix")
     args = ap.parse_args()
 
     with open(args.candidates, encoding="utf-8") as f:
@@ -113,7 +166,7 @@ def main():
 
     import torch
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
-    rows = _score(rows, text, args.ckpt, args.template, device)
+    rows, text_used, label_score = _score(rows, text, args.ckpt, args.template, device, args.text_source)
     ranked = rank_candidates(rows, args.min_residual_energy)
     best = ranked[0]
     best_target = os.path.join(out_dir, f"{sample_id}_best_target.wav")
@@ -126,6 +179,9 @@ def main():
         "text": text,
         "video_path": cand.get("video_path"),
         "selector": "clap",
+        "text_source": args.text_source,
+        "text_used": text_used,            # what the candidates were scored against
+        "acoustic_label_score": label_score,
         "selector_config": {"ckpt": args.ckpt, "template": args.template,
                             "min_residual_energy": args.min_residual_energy},
         "best": {**best, "best_target": best_target, "best_residual": best_residual},

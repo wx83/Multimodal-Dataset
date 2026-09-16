@@ -13,7 +13,40 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "models"))
 
-from clap_select_worker import rank_candidates  # noqa: E402  纯 Python，不需要 torch
+from clap_select_worker import rank_candidates, pick_acoustic_label, ACOUSTIC_LABELS  # noqa: E402  纯 Python，不需要 torch
+
+
+def test_default_text_source_is_object_and_invalid_rejected():
+    os.environ.pop("BESTOF_TEXT", None)
+    import audio_removal_model as arm
+    importlib.reload(arm)
+    assert arm.AudioRemovalModel(mock=True).bestof_text == "object"
+    try:
+        arm.AudioRemovalModel(mock=True, bestof_text="caption")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("未知的 BESTOF_TEXT 应该报错")
+
+
+def test_env_switch_selects_acoustic_text():
+    os.environ["BESTOF_TEXT"] = "acoustic"
+    try:
+        import audio_removal_model as arm
+        importlib.reload(arm)
+        assert arm.AudioRemovalModel(mock=True).bestof_text == "acoustic"
+    finally:
+        os.environ.pop("BESTOF_TEXT", None)
+        importlib.reload(arm)
+
+
+def test_pick_acoustic_label_is_argmax_over_table():
+    sims = [0.0] * len(ACOUSTIC_LABELS)
+    i = ACOUSTIC_LABELS.index("footsteps")
+    sims[i] = 0.9
+    label, score = pick_acoustic_label(sims)
+    assert label == "footsteps" and score == 0.9
+    assert len(set(ACOUSTIC_LABELS)) == len(ACOUSTIC_LABELS), "标签表有重复"
 
 
 def _row(name, removal, energy, s_target=0.0):
