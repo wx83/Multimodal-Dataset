@@ -17,6 +17,8 @@ class AVState(TypedDict, total=False):
     acoustic_desc: str
     acoustic_desc_score: float
     acoustic_desc_source: str
+    speech_score: float        # CLAP 对 speech 标签的相似度；speech 不是目标，只作 has_speech 标注（A02）
+    speech_excluded: bool      # 人物类目标：声学描述已排除 speech 标签
 
     # segmentation
     mask_path: str

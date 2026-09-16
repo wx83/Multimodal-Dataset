@@ -106,6 +106,31 @@ def test_config_and_record_carry_source():
         importlib.reload(utils)
 
 
+def test_person_target_excludes_speech_and_reports_it():
+    """任务语义（owner，A02）：人物类目标的声音 = 动作声，speech 专门不考虑；但 speech 在不在要记下来。"""
+    sys.path.insert(0, os.path.join(ROOT, "models"))
+    from clap_select_worker import pick_acoustic_label, is_person, SPEECH_LABELS, ACOUSTIC_LABELS
+    assert is_person("woman") and is_person("young man") and not is_person("dog") and not is_person("car door")
+    sims = [0.0] * len(ACOUSTIC_LABELS)
+    sims[ACOUSTIC_LABELS.index("speech")] = 0.9
+    sims[ACOUSTIC_LABELS.index("footsteps")] = 0.4
+    assert pick_acoustic_label(sims)[0] == "speech"                                   # 非人物：最高分照选
+    assert pick_acoustic_label(sims, exclude=SPEECH_LABELS)[0] == "footsteps"        # 人物：跳过 speech
+    nodes = _reload_nodes(ACOUSTIC_DESC="clap", AUDIO_TEXT="acoustic")
+    try:
+        out = nodes.sounding_object_extraction({"sample_id": "t", "caption": "a person walks in", "mock_acoustic_desc": "footsteps"})
+        assert out["target_object"] == "person"   # mock 抽取器词表里是 person
+        assert out["speech_excluded"] is True
+        import utils
+        importlib.reload(utils)
+        rec = utils.build_state_record({"sample_id": "t", **out, "speech_score": 0.3})
+        assert rec["speech_excluded"] is True and rec["speech_score"] == 0.3
+    finally:
+        _teardown()
+        import utils
+        importlib.reload(utils)
+
+
 if __name__ == "__main__":
     fails = 0
     for name, fn in sorted(globals().items()):

@@ -229,11 +229,16 @@ def sounding_object_extraction(state: AVState) -> AVState:
             r = _get_acoustic_desc_model().describe(
                 state.get("audio_path") or state.get("av_pair_path", ""),
                 mock_label=state.get("mock_acoustic_desc"),
+                target=objects[0],
             )
             update.update({
                 "acoustic_desc": r.acoustic_desc,
                 "acoustic_desc_score": r.score,
                 "acoustic_desc_source": r.source,
+                # speech is not the target (owner, A02) but its presence is worth keeping:
+                # a speech+action sample is the richest kind for the dataset
+                "speech_score": r.speech_score,
+                "speech_excluded": r.speech_excluded,
             })
         except Exception as e:
             print(f"[acoustic_desc] WARNING: {type(e).__name__}: {e} — falling back to target_object",

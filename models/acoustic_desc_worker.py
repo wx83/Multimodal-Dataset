@@ -32,10 +32,12 @@ def main():
     ap.add_argument("--ckpt", default=DEFAULT_CKPT)
     ap.add_argument("--template", default=DEFAULT_TEMPLATE)
     ap.add_argument("--top-k", type=int, default=5)
+    ap.add_argument("--target", default=None,
+                    help="object_name; for a person-class target speech labels are excluded (owner decision, A02)")
     args = ap.parse_args()
 
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    from clap_select_worker import ACOUSTIC_LABELS, pick_acoustic_label
+    from clap_select_worker import ACOUSTIC_LABELS, SPEECH_LABELS, is_person, pick_acoustic_label
     import numpy as np
     import soundfile as sf
     import torch
@@ -68,12 +70,19 @@ def main():
         aemb = l2n(np.asarray(model.get_audio_embedding_from_data(
             x=x[None, :].astype(np.float32), use_tensor=False)))[0]
     sims = aemb @ temb.T
-    label, score = pick_acoustic_label(sims)
+    person = is_person(args.target)
+    label, score = pick_acoustic_label(sims, exclude=SPEECH_LABELS if person else ())
     order = np.argsort(-sims)[:args.top_k]
+    # speech presence is reported on its own: it is not the target, but a
+    # speech+action sample is the richest kind (owner, A02) and worth marking
+    speech_score = max(float(sims[i]) for i in range(len(ACOUSTIC_LABELS)) if ACOUSTIC_LABELS[i] in SPEECH_LABELS)
     res = {
         "audio": args.audio,
+        "target": args.target,
         "acoustic_desc": label,
         "acoustic_desc_score": score,
+        "speech_excluded": person,
+        "speech_score": speech_score,
         "top": [{"label": ACOUSTIC_LABELS[i], "score": float(sims[i])} for i in order],
         "source": "clap-zeroshot",
         "ckpt": args.ckpt,

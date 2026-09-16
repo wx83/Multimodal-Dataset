@@ -67,9 +67,25 @@ ACOUSTIC_LABELS = [
 ]
 
 
-def pick_acoustic_label(sims, labels=ACOUSTIC_LABELS):
-    """Pure: index of the best-scoring label. Kept separate so it is testable without torch."""
-    best = max(range(len(labels)), key=lambda i: sims[i])
+# Task semantics, decided by the owner 2026-09-16 (strategy-lab asks/A02):
+# for a person-class target the "target's sound" is its ACTIONS (sound events);
+# speech — someone saying sentences — is deliberately not part of the task
+# (no audiovisual alignment). Non-verbal vocalisations (a scream, crying) are
+# sound events and stay eligible. So the acoustic description of a person never
+# resolves to a speech label; speech presence is reported separately (has_speech).
+SPEECH_LABELS = {"speech", "a man speaking", "a woman speaking", "a child speaking", "people talking", "whispering"}
+PERSON_WORDS = {"man", "woman", "person", "boy", "girl", "child", "kid", "baby", "people", "lady", "guy", "men", "women"}
+
+
+def is_person(target: str | None) -> bool:
+    t = (target or "").lower().strip()
+    return t in PERSON_WORDS or any(t.endswith(" " + w) for w in PERSON_WORDS)
+
+
+def pick_acoustic_label(sims, labels=ACOUSTIC_LABELS, exclude=()):
+    """Pure: index of the best-scoring label, skipping `exclude`. Testable without torch."""
+    cand = [i for i in range(len(labels)) if labels[i] not in exclude] or list(range(len(labels)))
+    best = max(cand, key=lambda i: sims[i])
     return labels[best], float(sims[best])
 
 

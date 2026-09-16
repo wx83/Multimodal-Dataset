@@ -103,6 +103,8 @@ def build_state_record(state: Dict[str, Any]) -> Dict[str, Any]:
         "acoustic_desc": state.get("acoustic_desc"),
         "acoustic_desc_score": state.get("acoustic_desc_score"),
         "acoustic_desc_source": state.get("acoustic_desc_source"),
+        "speech_score": state.get("speech_score"),
+        "speech_excluded": state.get("speech_excluded"),
         "mask_path": state.get("mask_path"),
         "inpainted_video_path": state.get("inpainted_video_path"),
         # SAM-Audio: mask-pass then text-pass (all four kept)
