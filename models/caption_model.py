@@ -40,6 +40,10 @@ class CaptionModel:
     def __init__(
         self,
         model_name: str = "Qwen/Qwen3-Omni-30B-A3B-Instruct",
+        # 换 captioner 时这两个要和 checkpoint 配套：Qwen2.5-Omni 与 Qwen3-Omni
+        # 在 transformers 里不是同一套类。None 表示用 worker 的默认（Qwen3-Omni）。
+        model_class: str | None = None,
+        processor_class: str | None = None,
         python_bin: str = DEFAULT_QWEN_PYTHON,
         worker: str = str(WORKER),
         max_new_tokens: int = 256,
@@ -50,6 +54,8 @@ class CaptionModel:
         mock: bool = True,
     ):
         self.model_name = model_name
+        self.model_class = model_class
+        self.processor_class = processor_class
         self.python_bin = python_bin
         self.worker = worker
         self.max_new_tokens = max_new_tokens
@@ -70,6 +76,10 @@ class CaptionModel:
             "--out", out_path,
         ]
         cmd.append("--use_audio_in_video" if self.use_audio_in_video else "--no_audio_in_video")
+        if self.model_class:
+            cmd += ["--model_class", self.model_class]
+        if self.processor_class:
+            cmd += ["--processor_class", self.processor_class]
         return cmd
 
     def generate(self, av_pair_path: str) -> str:

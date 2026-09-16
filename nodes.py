@@ -56,6 +56,21 @@ if SAM3_FIRST_FRAME_THRESHOLD < SAM3_FIRST_FRAME_INTENDED:
         flush=True,
     )
 
+# 音频闸目前是桩：audio_removal_check 只读 mock 字段，从不调模型。
+# 沿用本文件对 SAM3 放宽闸的处理方式（commit 3bae3f0）——不静默改行为，
+# 但让它自报家门，使「闸其实没测量」这件事在日志里无法伪装成正常运行。
+# 实测后果：历史 8907 条里到达该闸的 1946 条，audio_removal_score 只有 2 个取值，
+# 1945 条恰为下面那个默认值；同口径下 visual_removal_score 有 693 个取值。
+AUDIO_SCORE_IS_MEASURED = False
+AUDIO_SCORE_STUB_DEFAULT = 0.90
+if not AUDIO_SCORE_IS_MEASURED:
+    print(
+        f"[gate] WARNING: audio removal score is NOT measured "
+        f"(stub default {AUDIO_SCORE_STUB_DEFAULT}). The audio gate passes everything; "
+        f"audio-side quality is unverified. See models/audio_checker.py.",
+        flush=True,
+    )
+
 # EffectErase max frames to inpaint (clamped to the largest valid 4n+1 that fits
 # the mask/fg_bg). 192 ≈ full 8s clip at 24fps -> the worker uses 189.
 INPAINT_NUM_FRAMES = int(os.environ.get("INPAINT_NUM_FRAMES", "192"))
@@ -194,6 +209,9 @@ def target_object_segmentation(state: AVState) -> AVState:
     update: AVState = {
         "mask_path": result.mask_path or "",
         "mask_area_ratio": result.mask_area_ratio,
+        # 保留首帧比例原值：低于门槛时上面那个会被抹成 0，真值只在这里
+        "first_frame_ratio": result.first_frame_ratio,
+        "n_instances": result.n_instances,
     }
 
     if result.discard_reason:
@@ -330,9 +348,25 @@ def samaudio_best_of_remove(state: AVState) -> AVState:
 
 @track_node
 def audio_removal_check(state: AVState) -> AVState:
-    score = state.get("mock_audio_removal_score", 0.90)
+    # ⚠ 这道闸是桩，不是检查。与上面的 inpainted_video_check 对照即可看出：
+    # 视觉侧有 _use_real_models() 分支、真的调 SAM3 verify_removal；
+    # 这里只读一个 **mock_** 字段，从不调用任何模型。
+    #
+    # 历史数据的后果（8907 条真实运行）：到达此闸的 1946 条里，
+    # audio_removal_score 只有 2 个取值——1945 条恰好是下面这个默认值 0.90，
+    # 另 1 条 0.55 来自显式覆盖。对照 visual_removal_score 有 693 个不同取值。
+    # 也就是说**音频侧从未被验证过，一条都没有**，"四道质量闸"实为三道加一个桩。
+    #
+    # 这也解释了多实例不一致为何一直无人发现：唯一可能发现它的东西不存在。
+    # 要真正实现：参照 verify_removal 的形状，对残余音频重跑分离并比较能量。
+    score = state.get("mock_audio_removal_score", AUDIO_SCORE_STUB_DEFAULT)
 
-    update: AVState = {"audio_removal_score": score}
+    update: AVState = {
+        "audio_removal_score": score,
+        # 分数是不是测出来的，必须跟着分数一起落盘。否则下游没有任何办法
+        # 区分「音频侧确实合格」与「根本没测」——这正是 8907 条历史数据的处境。
+        "audio_score_measured": AUDIO_SCORE_IS_MEASURED,
+    }
 
     from routes import AUDIO_SCORE_THRESHOLD  # single source for the gate value
     if score <= AUDIO_SCORE_THRESHOLD:

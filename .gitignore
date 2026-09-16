@@ -29,3 +29,4 @@ slurm-logs/
 
 # --- HF showcase media (published on the Space, too heavy for git) ---
 hf_showcase/media/
+.langgraph_api/

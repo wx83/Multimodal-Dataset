@@ -63,9 +63,16 @@ def load_frames(video_path: str, max_seconds: int, fps: int, sam3_repo: str):
 def segment_top_mask(model, processor, frames_bgr, prompt, height, width, device, batch_size):
     """Run SAM3 over frames_bgr in batches; yield the top-instance binary mask per frame.
 
-    Returns a list of (H, W) uint8 masks (None where nothing detected).
+    Returns (masks, inst_counts): masks is a list of (H, W) uint8 (None where nothing
+    detected); inst_counts is how many instances SAM3 returned per frame.
+
+    2026-08-30: inst_counts 是新增的。此前只取 masks[0] 丢弃其余实例，而 SAM-Audio
+    按文本分离**全部**实例——两侧口径不一致。实测已交付样本中 8.8% 命中多实例
+    （95%CI 4.3-17.0，n=80），推算全量 1945 条里约 170 条两侧删的不是同一个物体。
+    不上报实例数就无法察觉这件事。
     """
     masks = []
+    inst_counts = []
     for start in range(0, len(frames_bgr), batch_size):
         batch_bgr = frames_bgr[start:start + batch_size]
         batch_imgs = [Image.fromarray(cv2.cvtColor(f, cv2.COLOR_BGR2RGB)) for f in batch_bgr]
@@ -77,13 +84,14 @@ def segment_top_mask(model, processor, frames_bgr, prompt, height, width, device
             outputs, threshold=CONF_THRESHOLD, target_sizes=[(height, width)] * len(batch_imgs)
         )
         for r in results:
+            inst_counts.append(len(r["masks"]))
             if len(r["masks"]) > 0:
                 m = r["masks"][0].cpu().numpy().astype(np.uint8)
                 m = cv2.resize(m, (width, height), interpolation=cv2.INTER_NEAREST)
                 masks.append(m)
             else:
                 masks.append(None)
-    return masks
+    return masks, inst_counts
 
 
 def largest_cc_ratio(mask_np, frame_area) -> float:
@@ -158,10 +166,11 @@ def run_segment(model, processor, args, device):
         raise RuntimeError(f"No frames decoded from {args.video}")
     frame_area = width * height
 
-    mask0 = segment_top_mask(
+    masks0, inst0 = segment_top_mask(
         model, processor, frames_bgr[:1], args.prompt, height, width, device, args.batch_size
-    )[0]
-    ratio = largest_cc_ratio(mask0, frame_area)
+    )
+    ratio = largest_cc_ratio(masks0[0], frame_area)
+    n_inst = inst0[0] if inst0 else 0
 
     result = {
         "mode": "segment",
@@ -173,10 +182,13 @@ def run_segment(model, processor, args, device):
         "passed": ratio > args.first_frame_threshold,
         "num_frames": len(frames_bgr),
         "mask_path": None,
+        # 首帧检出的实例数。>1 表示该词在画面里指向多个物体，而音频侧会把它们全部
+        # 分离——两侧口径不一致。只上报，是否据此拦截由 routes.py 决定。
+        "n_instances": n_inst,
     }
     if result["passed"]:
         t0 = time.time()
-        masks = segment_top_mask(
+        masks, _ = segment_top_mask(
             model, processor, frames_bgr, args.prompt, height, width, device, args.batch_size
         )
         result.update(write_mask_videos(
@@ -198,7 +210,7 @@ def run_verify(model, processor, args, device):
     if not frames_bgr:
         raise RuntimeError(f"No frames decoded from {args.inpainted_video}")
     inp_px = width * height
-    masks = segment_top_mask(
+    masks, _ = segment_top_mask(
         model, processor, frames_bgr, args.prompt, height, width, device, args.batch_size
     )
     inpaint_frac = [(int(np.sum(m > 0)) / inp_px) if m is not None else 0.0 for m in masks]
