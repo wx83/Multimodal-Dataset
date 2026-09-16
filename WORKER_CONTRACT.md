@@ -21,8 +21,13 @@
 | 兜底 | 同时把 `<NAME>_RESULT {json}` 打到 stdout 一行 |
 | 解析 | wrapper 先读文件，读不到再从 stdout 找 marker 行，都失败才报错并附 stdout 末尾 2000 字 |
 
-现有的六个 marker：`QWEN3_OMNI_RESULT`、`SAM3_RESULT`、`SAM_AUDIO_RESULT`、
-`EFFECTERASE_RESULT`、`LTX_ENHANCE_RESULT`、`IB_SELECT_RESULT`。
+现有的七个 marker：`QWEN3_OMNI_RESULT`、`SAM3_RESULT`、`SAM_AUDIO_RESULT`、
+`EFFECTERASE_RESULT`、`LTX_ENHANCE_RESULT`、`IB_SELECT_RESULT`、`CLAP_SELECT_RESULT`。
+
+其中 `IB_SELECT_RESULT` 与 `CLAP_SELECT_RESULT` 是同一个阶段（best-of 选优）的两个可换
+选优器，由 `BESTOF_SELECTOR=ib|clap` 切换，默认 `ib`（历史行为逐位不变）。
+为什么有第二个：ImageBind 键与移除质量在样本内秩相关 +0.02，换键无增益；CLAP 的
+`s_mix − s_res` 有（avgraph-strategy-lab S52/S53）。增益是回测上限，开之前要在新生成上 A/B。
 
 **所以换模型 = 写一个遵守这份契约的新 worker**，加上让 wrapper 指向它
 （`python_bin` 与 `worker` 都是 `__init__` 参数）。不需要动图、路由或任何节点。

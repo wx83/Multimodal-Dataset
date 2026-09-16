@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -34,8 +35,17 @@ DEFAULT_JAVISDIT_PYTHON = os.environ.get(
 DEFAULT_JAVISDIT_ROOT = os.environ.get("JAVISDIT_ROOT", "/group2/ct/weihanx/JavisDiT")
 # Fixed seeds from /group2/ct/weihanx/ranking_test/seeds.json (reproducible best-of-10).
 DEFAULT_BEST_OF_SEEDS = (1132891577, 1778986134, 240868205, 1453635084, 1335522078)
+# Which stage-B selector picks the best-of winner. "ib" is the historical
+# behaviour (max ib_ta, tiebreak min ib_ta_res). "clap" ranks by CLAP
+# text<->audio removal (s_mix - s_res) — see clap_select_worker.py for why.
+# Default stays "ib" so every existing run is reproduced bit-for-bit; flip it
+# per run once an A/B on fresh generations says so.
+DEFAULT_BESTOF_SELECTOR = os.environ.get("BESTOF_SELECTOR", "ib")
+CLAP_SELECT_WORKER = Path(__file__).resolve().parent / "clap_select_worker.py"
+DEFAULT_CLAP_SELECT_PYTHON = os.environ.get("CLAP_SELECT_PYTHON", sys.executable)
 RESULT_MARKER = "SAM_AUDIO_RESULT "
 IB_RESULT_MARKER = "IB_SELECT_RESULT "
+CLAP_RESULT_MARKER = "CLAP_SELECT_RESULT "
 
 
 @dataclass
@@ -48,6 +58,8 @@ class AudioRemovalResult:
     ib_ta: float | None = None      # ImageBind text<->target (higher = better)
     ib_ta_res: float | None = None  # ImageBind text<->residual (lower = cleaner)
     selection_path: str | None = None
+    selector: str | None = None     # "ib" | "clap" — which rule picked the winner
+    clap_removal: float | None = None  # CLAP s_mix - s_res of the winner (clap selector only)
 
 
 class AudioRemovalModel:
@@ -66,7 +78,15 @@ class AudioRemovalModel:
         javisdit_root: str = DEFAULT_JAVISDIT_ROOT,
         select_worker: str = str(SELECT_WORKER),
         best_of_seeds: tuple[int, ...] = DEFAULT_BEST_OF_SEEDS,
+        selector: str = DEFAULT_BESTOF_SELECTOR,
+        clap_select_python: str = DEFAULT_CLAP_SELECT_PYTHON,
+        clap_select_worker: str = str(CLAP_SELECT_WORKER),
     ):
+        if selector not in ("ib", "clap"):
+            raise ValueError(f"BESTOF_SELECTOR must be 'ib' or 'clap', got {selector!r}")
+        self.selector = selector
+        self.clap_select_python = clap_select_python
+        self.clap_select_worker = clap_select_worker
         self.model_dir = model_dir
         self.python_bin = python_bin
         self.worker = worker
@@ -162,6 +182,8 @@ class AudioRemovalModel:
             )
 
         selection_path = os.path.join(out_dir, "selection.json")
+        if self.selector == "clap":
+            return self._select_clap(out_dir, selection_path)
         cmd = [
             self.javisdit_python, self.select_worker,
             "--candidates", os.path.join(out_dir, "candidates.json"),
@@ -195,6 +217,35 @@ class AudioRemovalModel:
             ib_ta=best.get("ib_ta"),
             ib_ta_res=best.get("ib_ta_res"),
             selection_path=selection_path,
+            selector="ib",
+        )
+
+    def _select_clap(self, out_dir: str, selection_path: str) -> AudioRemovalResult:
+        """Stage B with the CLAP selector (BESTOF_SELECTOR=clap). Same inputs and
+        output files as the ImageBind path, so downstream nodes see no difference
+        except the winner — and selection.json says which rule chose it."""
+        cmd = [
+            self.clap_select_python, self.clap_select_worker,
+            "--candidates", os.path.join(out_dir, "candidates.json"),
+            "--out", selection_path,
+        ]
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=self.timeout)
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"CLAP selection worker failed (exit {proc.returncode}).\n"
+                f"CMD: {' '.join(cmd)}\n"
+                f"STDERR (tail):\n{proc.stderr[-4000:]}"
+            )
+        data = self._parse(selection_path, proc.stdout, marker=CLAP_RESULT_MARKER)
+        best = data.get("best", {})
+        return AudioRemovalResult(
+            residual_path=best.get("best_residual"),
+            target_path=best.get("best_target"),
+            method=best.get("method"),
+            seed=best.get("seed"),
+            selection_path=selection_path,
+            selector="clap",
+            clap_removal=best.get("clap_removal"),
         )
 
     def _subprocess_env(self) -> dict:

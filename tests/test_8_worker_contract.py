@@ -32,6 +32,7 @@ PAIRS = {
     "effecterase_worker.py": "inpainting_model.py",
     "ltx_enhance_worker.py": "av_enhance_model.py",
     "ib_select_worker.py": "audio_removal_model.py",
+    "clap_select_worker.py": "audio_removal_model.py",
 }
 
 
