@@ -235,7 +235,8 @@ connected component. Fragmentation was not a real problem.
 `mask_check` rejects 5,861 of the 8,221 samples that reach it — **71.3%**. It is
 where the pipeline's throughput goes.
 
-But 58.3% of those rejections have `mask_area_ratio` **exactly 0**, which is
+But **4,789** of those 5,861 rejections — **81.7%** of them, and 58.3% of
+everything that reaches the gate — have `mask_area_ratio` **exactly 0**, which is
 SAM3's genuine output, not an artifact of the gate. The words that distinguish
 the zero group are `vehicle engine` (140), `truck engine` (84), `footsteps` (40)
 — sound sources that are not separable objects. No threshold change reaches
