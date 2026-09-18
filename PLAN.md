@@ -1,49 +1,51 @@
-# 长跑实验计划
+# Long-Run Experiment Plan
 
-目标：把 [编排框架](https://tdoc.dev/d/avgraph-orchestration-theory/v/2) 里的假设，
-在真管线上一条条测掉。**先测量，后优化**——五个决定一切的数目前一个都没测过。
+Goal: take the assumptions in the [orchestration framework](https://tdoc.dev/d/avgraph-orchestration-theory/v/2)
+and knock them down one by one on the real pipeline. **Measure first, optimize later** — not one of the
+five numbers that decide everything has been measured yet.
 
-## 当前状态（2026-08-29）
+## Current Status (2026-08-29)
 
-| 项 | 状态 |
+| Item | Status |
 |---|---|
-| 六个 conda 环境 | ✅ weihan 今日建好（`sam3` 里 torch 2.10.0+cu128、CUDA 可用） |
-| pipeline 代码 | ✅ 已在 `/scratch/weihan/av_langgraph_pipeline` |
-| mock 全链 | ✅ 服务器上跑通（`test_1` `test_2` `test_5` 全过，langgraph 1.2.5 兼容） |
-| 输入素材 | ✅ `/scratch/unbalanced_mp4` 共 284,678 个 mp4 |
-| 空闲算力 | ✅ GPU 1（A6000 46GB）空闲；GPU 0 被占 46GB |
-| **模型权重** | ❌ **唯一阻塞项**，见下 |
+| Six conda environments | ✅ weihan built them today (`sam3` has torch 2.10.0+cu128, CUDA available) |
+| pipeline code | ✅ already at `/scratch/weihan/av_langgraph_pipeline` |
+| mock full chain | ✅ runs end-to-end on the server (`test_1` `test_2` `test_5` all pass, langgraph 1.2.5 compatible) |
+| input material | ✅ `/scratch/unbalanced_mp4`, 284,678 mp4 files total |
+| idle compute | ✅ GPU 1 (A6000 46GB) idle; GPU 0 occupied with 46GB |
+| **model weights** | ❌ **the only blocker**, see below |
 
-### 权重缺口（需要 weihan 确认或提供）
+### Missing Weights (needs weihan to confirm or provide)
 
-| 模型 | 代码期望的位置 | 现状 |
+| Model | Location the code expects | Current state |
 |---|---|---|
-| SAM3 | `pretrained_weight/sam3` | 缺 |
-| SAM-Audio | `pretrained_weight/sam_audio` | 缺 |
-| EffectErase LoRA | `pretrained_weight/inpainting` | 缺 |
-| Wan2.1-Fun-1.3B-InP（EffectErase 基座） | `Wan-AI/Wan2.1-Fun-1.3B-InP` | 缺 |
-| Qwen3-Omni-30B | HF 缓存 | 缺 |
-| LTX-2.3 22B | `ltx-2.3-22b-distilled-1.1.safetensors` | ⚠️ 有 `/scratch/ltx-2-3-22b-dev-Q8_0.gguf`（22G）但**格式不同**（GGUF vs safetensors），要么转换要么改代码 |
+| SAM3 | `pretrained_weight/sam3` | missing |
+| SAM-Audio | `pretrained_weight/sam_audio` | missing |
+| EffectErase LoRA | `pretrained_weight/inpainting` | missing |
+| Wan2.1-Fun-1.3B-InP (EffectErase base) | `Wan-AI/Wan2.1-Fun-1.3B-InP` | missing |
+| Qwen3-Omni-30B | HF cache | missing |
+| LTX-2.3 22B | `ltx-2.3-22b-distilled-1.1.safetensors` | ⚠️ `/scratch/ltx-2-3-22b-dev-Q8_0.gguf` (22G) exists but the **format differs** (GGUF vs safetensors); either convert it or change the code |
 
-## 关键的可行性洞察：不必等齐全部权重
+## The Key Feasibility Insight: No Need to Wait for All the Weights
 
-**h₀ = 各 gate 通过率的乘积，而各 gate 是顺序的**，所以每落地一个模型就能多测一段：
+**h₀ = the product of the per-gate pass rates, and the gates are sequential**, so every model that lands
+unlocks one more segment to measure:
 
 ```
-SAM3 到位        -> 能测 mask gate 通过率（最便宜的一段，失败只花 15 秒）
-+ EffectErase    -> 能测 视觉移除 gate
-+ SAM-Audio      -> 能测 音频 gate  -> 至此 h₀ 完整
-+ Qwen3-Omni     -> 换掉 pinned target，走真实 caption -> 但每条 +10 分钟
-+ LTX-2          -> 只影响最终增强，不影响 h₀
+SAM3 in place    -> can measure the mask gate pass rate (cheapest segment, a failure costs only 15 seconds)
++ EffectErase    -> can measure the visual removal gate
++ SAM-Audio      -> can measure the audio gate  -> h₀ is complete at this point
++ Qwen3-Omni     -> replaces the pinned target, uses the real caption -> but +10 minutes per sample
++ LTX-2          -> only affects the final enhancement, does not affect h₀
 ```
 
-**先上 SAM3 就能开工。** 这是成本最低、信息量最高的一步。
+**SAM3 alone is enough to start.** It is the lowest-cost, highest-information step.
 
-## 测量成本（实算，不是估计）
+## Measurement Cost (costed out, not estimated)
 
-失败样本早退，所以每条均价远低于 28.5 分钟：
+Failing samples exit early, so the average per-sample cost is far below 28.5 minutes:
 
-| 真实 h₀ | 每条均价 | 300 条 | 1000 条 |
+| True h₀ | Avg per sample | 300 samples | 1000 samples |
 |---|---|---|---|
 | 40% | 16.8 min | 84 GPU-h | 279 GPU-h |
 | 20% | 11.6 min | 58 h | 194 h |
@@ -51,68 +53,71 @@ SAM3 到位        -> 能测 mask gate 通过率（最便宜的一段，失败�
 | 5% | 6.1 min | 31 h | 102 h |
 | 2% | 4.2 min | 21 h | 70 h |
 
-**通过率越低，测量越便宜**——而通过率低恰恰是最需要知道这个数的情形。
-单卡 A6000 连续跑，300 条大约 1–3.5 天。
+**The lower the pass rate, the cheaper the measurement** — and a low pass rate is exactly the case where
+you most need this number. On a single A6000 running continuously, 300 samples take roughly 1–3.5 days.
 
-### 一个顺带发现的架构问题
+### An Architectural Problem Found Along the Way
 
-上表**不含 caption**。Qwen3-Omni 每条 10 分钟，而且它跑在**所有 gate 之前**——
-300 条就是 50 GPU-小时纯 caption，比其余全部加起来还贵。
+The table above **excludes caption**. Qwen3-Omni costs 10 minutes per sample, and it runs **before all
+the gates** — 300 samples is 50 GPU-hours of pure caption, more expensive than everything else combined.
 
-**任何 gate 都无法保护它**，因为 mask gate 需要目标物体，而目标物体来自 caption。
-如果能在 caption 之前插一道便宜的粗筛（比如通用检测器判断「画面里有没有可分割的显著物体」），
-成本会大幅下降。这条本身值得作为一个实验假设。
-
----
-
-## 阶段计划
-
-### 阶段 0 · 解除权重阻塞（需要人）
-确认上表六项的落点。最小可开工集合 = **SAM3**。
-
-### 阶段 1 · L0 度量层（长跑主体）
-按 `AGENTS.md §4` 测五个数，用固定配置、不做任何搜索。
-
-1. **h₀ 基线通过率** —— 300 条起步，用 `decide_from_real_data.py` 出判决与置信区间
-2. **σ 观测噪声** —— 同一条片子、同一配置重复 10 次，看三个 gate 分数的方差
-3. **Δq 配置间质量差** —— 同一条片子扫 5 组参数，看分数跨度
-4. **κ 搜索成本比** —— 从阶段 2 的运行日志里直接算
-5. **A 阈值附近密度** —— 从 h₀ 那批的分数分布直接算
-
-**这一阶段不需要任何 agent 自主性。** 它就是度量层，用确定性脚本跑。
-
-**中途会验证的假设**：
-- 三个 gate 的淘汰量是否均衡（mock 数据显示 22.0/21.5/21.5%，无单一瓶颈）
-- 分数中位数是否压在阈值上方（mock 显示 0.232/0.842/0.830 vs 阈值 0.15/0.80/0.80，
-  若真实数据也如此，则阈值放大效应成立，调参风险极高）
-- 局部 gate 分数与最终交付的**秩相关**——这一条直接决定该不该做逐节点分解（命题 2）
-
-### 阶段 2 · 元种子对照
-拿到五个数之后，按 `METASEEDS.md` 跑 M1 / M2 / M3 + 不搜索对照组。
-**对照组必须在场。** 每轮记录实测 (F, A, R) 坐标。
-
-### 阶段 3 · 只在阶段 1 的数支持时才做
-若 h₀ < 3.5%（命题 1 的分界），才上逐样本搜索；否则一遍过。
-若局部信号与最终结果秩相关高，才做 multi-agent 逐节点分解。
+**No gate can protect it**, because the mask gate needs a target object, and the target object comes from
+the caption. If a cheap coarse filter could be inserted before the caption (for example, a generic detector
+deciding "is there a segmentable salient object in the frame at all"), the cost would drop sharply. This
+is itself worth stating as an experimental hypothesis.
 
 ---
 
-## 执行架构
+## Phase Plan
 
-一个**常驻 master** 持有状态、元种子、跨轮记忆，按重规划间隔 X 决定何时调整；
-每轮**派独立 subagent** 执行，其中**至少一个带对抗性指令**（「默认结论是错的」）。
+### Phase 0 · Unblock the weights (needs a human)
+Confirm where the six items above land. The minimum set to start work = **SAM3**.
 
-分层的理由是**误差去相关，不是并行度**：一夜之间对抗性复核找到四个真 bug，
-两个足以让全部结论作废，而它们都不是被更好的搜索算法找到的。
+### Phase 1 · L0 measurement layer (the bulk of the long run)
+Measure the five numbers per `AGENTS.md §4`, with a fixed configuration and no search of any kind.
 
-## 每轮必须落盘的东西
+1. **h₀ baseline pass rate** — start with 300 samples, use `decide_from_real_data.py` for the verdict and confidence interval
+2. **σ observation noise** — same clip, same configuration, repeated 10 times, look at the variance of the three gate scores
+3. **Δq cross-configuration quality gap** — same clip, sweep 5 parameter sets, look at the score spread
+4. **κ search cost ratio** — computed directly from the Phase 2 run logs
+5. **A near-threshold density** — computed directly from the score distribution of the h₀ batch
 
-- `data/logs/state.jsonl`：每条样本的 gate 分数，**discard 的也要记**
-- `avgraph-strategy-lab/LOG.md`：过程日志，**被推翻的假设保留不删**
-- 每个结论标注：定理 / 实测 / 猜想，不显著的部分明说
-- M3 下 agent 写了哪些适配器、哪些事后有用——位置 2 唯一可累积的资产
+**This phase needs no agent autonomy at all.** It is the measurement layer, run with deterministic scripts.
 
-## 停止条件
+**Hypotheses that get validated along the way**:
+- Whether the three gates eliminate samples in balanced proportions (mock data shows 22.0/21.5/21.5%, no single bottleneck)
+- Whether the score medians sit above the thresholds (mock shows 0.232/0.842/0.830 vs thresholds 0.15/0.80/0.80;
+  if real data behaves the same, the threshold amplification effect holds and tuning is extremely risky)
+- The **rank correlation** between local gate scores and final delivery — this alone decides whether per-node decomposition is worth doing (Proposition 2)
 
-- 五个数都测出来且置信区间不跨过决策分界 → 阶段 1 完成
-- 或：算力耗尽 → 报告当前置信区间与还差多少条
+### Phase 2 · Meta-seed comparison
+Once the five numbers are in, run M1 / M2 / M3 plus a no-search control group per `METASEEDS.md`.
+**The control group must be present.** Record the measured (F, A, R) coordinates each round.
+
+### Phase 3 · Only if the Phase 1 numbers support it
+Only go to per-sample search if h₀ < 3.5% (Proposition 1's boundary); otherwise a single pass.
+Only do multi-agent per-node decomposition if local signals correlate strongly in rank with the final result.
+
+---
+
+## Execution Architecture
+
+One **resident master** holds the state, the meta-seeds, and the cross-round memory, and decides when to
+adjust based on the replanning interval X; each round **dispatches independent subagents**, at least one
+of them **with adversarial instructions** ("the default conclusion is wrong").
+
+The reason for the layering is **error decorrelation, not parallelism**: in one night the adversarial
+review found four real bugs, two of which were enough to invalidate every conclusion, and none of them
+were found by a better search algorithm.
+
+## What Must Be Written to Disk Every Round
+
+- `data/logs/state.jsonl`: the gate scores of every sample, **including the discarded ones**
+- `avgraph-strategy-lab/LOG.md`: the process log, **refuted hypotheses are kept, not deleted**
+- Every conclusion labeled: theorem / measured / conjecture, with the non-significant parts stated outright
+- Which adapters the agent wrote under M3 and which turned out useful afterwards — the only cumulative asset at position 2
+
+## Stopping Conditions
+
+- All five numbers measured, with confidence intervals that do not straddle a decision boundary → Phase 1 complete
+- Or: compute exhausted → report the current confidence intervals and how many more samples are needed

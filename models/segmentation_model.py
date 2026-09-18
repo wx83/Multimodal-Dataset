@@ -40,7 +40,8 @@ class SegmentationResult:
     mask_path: str | None
     mask_area_ratio: float
     first_frame_ratio: float | None = None
-    # SAM3 在首帧检出的实例数。None = mock 路径或旧 worker（无此字段），不是 0。
+    # Instances SAM3 detected in the first frame. None = mock path or an older worker
+    # (field absent), which is not the same as 0.
     n_instances: int | None = None
     discard_reason: str | None = None
 

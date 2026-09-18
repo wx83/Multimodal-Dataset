@@ -1,117 +1,117 @@
-# AGENTS.md — 在这个仓库里干活的规矩
+# AGENTS.md — rules for working in this repo
 
-给任何要动这条管线的 agent（也给人）。**先读这份，再动手。**
+For any agent (and any human) about to touch this pipeline. **Read this first, then act.**
 
-依据来自两份实验文档：
-[编排即预算分配](https://tdoc.dev/d/avgraph-orchestration-theory/v/2)（形式化框架）与
-[实验结果](https://tdoc.dev/d/avgraph-agent-autonomy/v/3)，代码与过程日志在
-<https://github.com/yayashuxue/avgraph-strategy-lab>。
+The basis is two experiment documents:
+[Orchestration as budget allocation](https://tdoc.dev/d/avgraph-orchestration-theory/v/2) (the formal framework) and
+[Experimental results](https://tdoc.dev/d/avgraph-agent-autonomy/v/3); code and process log are at
+<https://github.com/yayashuxue/avgraph-strategy-lab>.
 
 ---
 
-## 1. 不变量：这些东西谁都不许动
+## 1. Invariants: nobody touches these
 
-| 不变量 | 在哪 | 动了会怎样 |
+| Invariant | Where | What happens if you touch it |
 |---|---|---|
-| gate 阈值 | `routes.py` 的 `*_THRESHOLD` | 实测 −21.4% 交付、污染率 62%、上报产量虚高 2.6–3.5 倍 |
-| 外生质量线 | 验收侧，不在管线内 | 它是 reward 的定义。管线内看得见的一切都不是它 |
-| 验收口径 | 与门（逐节点全过）还是均值（可互相补偿） | 这一条决定「放松 gate」是赚是亏，比耦合结构更关键 |
-| 节点契约 | `state.py` 的 `AVState` | 读什么、写什么、必报哪个指标 —— 见 §3 |
+| gate thresholds | `*_THRESHOLD` in `routes.py` | measured −21.4% delivery, 62% contamination rate, reported output inflated 2.6–3.5x |
+| exogenous quality line | on the acceptance side, not in the pipeline | it is the definition of the reward. Nothing visible inside the pipeline is it |
+| acceptance definition | AND (every node must pass) vs mean (nodes can compensate for each other) | this one decides whether "relax the gate" gains or loses, and it matters more than the coupling structure |
+| node contract | `AVState` in `state.py` | what it reads, what it writes, which metric it must report — see §3 |
 
-**为什么**：agent 看得见的产量对阈值**单调递减**，所以它在任何情况下都会把阈值推到最低（等于拆掉 gate）——**它能看见的目标函数在这个方向上没有极值点**。真最优阈值是内点，但只有看得见真实质量的人才算得出来。
+**Why**: the output an agent can see is **monotonically decreasing** in the threshold, so under all circumstances it will push the threshold to the minimum (which equals dismantling the gate) — **the objective function it can see has no interior optimum in that direction**. The true optimal threshold is an interior point, but only someone who can see the real quality can compute it.
 
-**这不是信任问题，是可观测性问题。** 正确的表述是「阈值由离线带标注整定，agent 不得触碰」，**不是**「阈值天生神圣」——现有证据说当前的 `τ=0.55` 本身就没整定对。
+**This is not a trust problem, it is an observability problem.** The correct phrasing is "thresholds are tuned offline on labeled data, agents must not touch them", **not** "thresholds are sacred by nature" — the existing evidence says the current `τ=0.55` was itself never tuned correctly.
 
-## 2. 可以动的：三层，越往下越开放
+## 2. What you can touch: three layers, more open as you go down
 
-**L1 求解层——不要交给 agent。** 给定 (M, σ, Δq, κ, h₀)，最优的搜索策略是算出来的，确定性算法有最优性保证。让 agent 在这里跟专门算法竞争是浪费。
+**L1, the solving layer — do not hand this to an agent.** Given (M, σ, Δq, κ, h₀), the optimal search strategy is computed, and deterministic algorithms come with optimality guarantees. Making an agent compete with a dedicated algorithm here is a waste.
 
-**L2 提议层——agent 的第一个位置。** 在既定配置空间内生成候选。它的作用不是"更快地穷举"，是把候选集中到高质量区域，等价于把有效搜索空间变小。**上线必须带随机抽样对照**：比提议的质量分位，赢不过随机就是没用。
+**L2, the proposal layer — the agent's first place.** Generate candidates inside a fixed config space. Its role is not "enumerate faster", it is to concentrate candidates in high-quality regions, which is equivalent to shrinking the effective search space. **Shipping requires a random-sampling control**: compare quality quantiles of the proposals; if it cannot beat random, it is useless.
 
-**L3 重构层——agent 的第二个位置，也是唯一不可替代的。** 提出配置空间里原本没有的维度。具体机制是**写 glue code 把新模型/新 prompt 形式接进管线**——传统做法下空间边界不是由「什么有用」决定的，是由「谁事先写了适配器」决定的，而这个约束偏向保守。
+**L3, the restructuring layer — the agent's second place, and the only irreplaceable one.** Propose dimensions that were not in the config space at all. Concretely the mechanism is **writing glue code to wire a new model / new prompt form into the pipeline** — traditionally the space boundary is not decided by "what is useful", it is decided by "who wrote an adapter in advance", and that constraint is biased conservative.
 
-**L3 的边界**：可以写适配器扩展空间，**不能改验收**。前者收益累积，后者是上面那张表里的 −21%。
+**L3's boundary**: you may write adapters to extend the space, **you may not change acceptance**. The former compounds; the latter is the −21% in the table above.
 
-## 3. 节点契约
+## 3. Node contract
 
-每个节点对外是**一进一出加一个指标**。以 `target_object_segmentation` 为例：
+Externally, each node is **one input, one output, plus one metric**. Take `target_object_segmentation` as an example:
 
 ```
-读：av_pair_path, target_object
-写：mask_path, mask_area_ratio
-产出：非空 mask 视频
-必报：mask_area_ratio（gate 的输入，节点不得自己判定通过与否）
+reads: av_pair_path, target_object
+writes: mask_path, mask_area_ratio
+produces: a non-empty mask video
+must report: mask_area_ratio (the gate's input; the node must not decide pass/fail itself)
 ```
 
-节点**内部**可以：换 worker（菜单内）、改提示方式、改参数、跑多组配置再挑一组。
-节点**不可以**：改自己输出什么、改指标含义、自己给自己按 gate 打分、跳过自己、直接调用下一个节点。
+**Inside** a node you may: swap workers (from the menu), change how it prompts, change parameters, run several configs and pick one.
+A node **may not**: change what it outputs, change what a metric means, score itself against the gate, skip itself, or call the next node directly.
 
-**换模型不是改参数。** 换分割模型会连 mask 表示和置信度语义一起变，直接破契约——所以换模型是**菜单项**（上架前验过格式兼容），不是自由选择。要上新模型，走 L3 写适配器。
+**Swapping models is not changing a parameter.** Swapping the segmentation model changes the mask representation and the confidence semantics along with it, which breaks the contract outright — so a model swap is a **menu item** (format compatibility verified before it is listed), not a free choice. To bring in a new model, go through L3 and write an adapter.
 
-## 4. 动手之前先测：五个数
+## 4. Measure before you act: five numbers
 
-所有策略结论都以这五个量为输入，而**目前一个都没测过**：
+Every strategy conclusion takes these five quantities as input, and **so far not one of them has been measured**:
 
-| 量 | 怎么测 | 为什么要紧 |
+| Quantity | How to measure | Why it matters |
 |---|---|---|
-| **h₀ 基线通过率** | 固定配置跑一批，数 `status=="passed"` | 解释力 47.4%，压倒其余全部。**15 个设计格点全判「别搜索」——光看参数做不出判断** |
-| σ 观测噪声 | 同一条片子同一配置重复跑，看分数方差 | 决定能不能分辨改进（噪声地板） |
-| Δq 配置间质量差 | 同一条片子扫几组配置 | 与 σ 一起决定采样复杂度 n ≳ M·(σ/Δq)² |
-| κ 搜索成本比 | 搜索策略每条的耗时 / 不搜索每条的耗时 | **搜索赢 ⟺ h₁/h₀ > κ**，一行代数定胜负 |
-| A 阈值附近密度 | 三个分数的分布 vs 阈值位置 | 阈值把质量差放大 2–163 倍 |
+| **h₀ baseline pass rate** | run a batch at a fixed config, count `status=="passed"` | 47.4% of the explanatory power, dominating everything else. **All 15 design grid points say "don't search" — you cannot make the call from the parameters alone** |
+| σ observation noise | rerun the same clip at the same config, look at score variance | decides whether improvements are distinguishable (the noise floor) |
+| Δq quality gap across configs | sweep several configs on the same clip | together with σ it sets the sampling complexity n ≳ M·(σ/Δq)² |
+| κ search cost ratio | per-sample time with search / per-sample time without | **search wins ⟺ h₁/h₀ > κ**, one line of algebra settles it |
+| A near-threshold density | the distribution of the three scores vs where the threshold sits | the threshold amplifies quality differences by 2–163x |
 
-工具：`avgraph-strategy-lab/experiments/decide_from_real_data.py`，喂 `state.jsonl` 即可。
+Tool: `avgraph-strategy-lab/experiments/decide_from_real_data.py`, just feed it `state.jsonl`.
 
-## 5. 公平性检查表
+## 5. Fairness checklist
 
-下面每一条都是**我们真的犯过的错**，不是假想风险：
+Every item below is **a mistake we actually made**, not a hypothetical risk:
 
-- [ ] **基线不是稻草人。** 对照组必须用离线调好的配置，不是任意配置。
-- [ ] **各方案起点相同。** 一个从调好的配置出发、另一个从随机点出发，比的不是策略。实测锚定值 +43.4 交付而探测深度只值 −1.1，**40 倍**——起点差异会淹没你想测的一切。
-- [ ] **各方案探测深度相同**，或把深度作为显式自变量扫。
-- [ ] **随机种子里不许混进本不该改变环境的参数。** 把 `noise` 或 `bar` 放进 regime 种子，"扫 noise" 就变成了在换地图。这个错我们犯了两次。
-- [ ] **不要复用同一次观测既做选择又做验收。** 那等于让 argmax 直接买通验收，winner's curse 的惩罚永远不计分。
-- [ ] **检查你的"质量线"是不是死代码。** 报 `P(过质量线 | 过 gate)`，接近 1 就说明它没生效。
-- [ ] **测不出效应时，先怀疑测量工具，不要宣布效应不存在。** 我们把「模拟器测不出 winner's curse」误读成了「winner's curse 不存在」。
+- [ ] **The baseline is not a straw man.** The control group must use the offline-tuned config, not an arbitrary one.
+- [ ] **All arms start from the same point.** One starting from a tuned config and another from a random point is not a comparison of strategies. Measured: the anchor value is worth +43.4 deliveries while probe depth is worth only −1.1, **40x** — a difference in starting point will drown out everything you wanted to measure.
+- [ ] **All arms probe to the same depth**, or sweep depth as an explicit independent variable.
+- [ ] **Do not let parameters that should not change the environment leak into the random seed.** Put `noise` or `bar` into the regime seed and "sweeping noise" turns into swapping maps. We made this mistake twice.
+- [ ] **Do not reuse the same observation for both selection and acceptance.** That lets argmax buy off acceptance directly, and the winner's-curse penalty never gets scored.
+- [ ] **Check whether your "quality line" is dead code.** Report `P(passes quality line | passes gate)`; close to 1 means it is not doing anything.
+- [ ] **When you cannot measure an effect, suspect the measuring instrument first, do not declare the effect nonexistent.** We misread "the simulator cannot measure winner's curse" as "winner's curse does not exist".
 
-## 5.5 根因规则（这条是从真实失误里来的）
+## 5.5 The root-cause rule (this one comes from a real failure)
 
-**定位到缺陷后，在提出任何修法之前，先找到并读完产生这个值的那段代码 / prompt / 配置。**
-把「根因在哪一行」写下来，再谈怎么改。找不到那一行就说找不到，不要提一个绕过它的方案。
+**Once you have located a defect, before proposing any fix, find and read through the code / prompt / config that produced the value.**
+Write down "which line the root cause is on", then talk about how to change it. If you cannot find that line, say so; do not propose a scheme that routes around it.
 
-真实案例：`car engine` 类目标 665 条通过率精确 0%（引擎藏在引擎盖里，视觉不可分割）。
-第一反应是运行时换成可见载体（car engine → car）并起了 1386 条实验——
-而根因就在 `models/object_extraction_model.py` 的 system prompt 里，
-`a running engine` 被明写为示例，整条 prompt 从未要求输出必须视觉可分割。
-那个补丁还会破坏音视频硬一致性（音频侧仍用 `car engine`，视觉侧擦掉整辆车）。
+Real case: `car engine` targets had a pass rate of exactly 0% over 665 samples (the engine is hidden under the hood, visually inseparable).
+The first reaction was to substitute a visible carrier at runtime (car engine → car) and launch 1386 runs —
+while the root cause was in the system prompt in `models/object_extraction_model.py`,
+where `a running engine` is written out as an example, and the whole prompt never required the output to be visually separable.
+That patch would also break audio-visual hard consistency (the audio side still uses `car engine` while the visual side erases the whole car).
 
-**为什么会这样**：绕过去的方案立刻能跑出数字，读 prompt 不产生数字，
-所以在「要有产出」的压力下总是赢。这是系统性偏置，不是偶发疏忽。
+**Why this happens**: the route-around scheme produces numbers immediately, reading the prompt produces no numbers,
+so under the pressure to "have output" it always wins. This is a systematic bias, not an occasional lapse.
 
-**加 agent 解决不了这条**：独立的盲测 agent 也发现了同一个异常，
-但它给的建议同样是「改成选可见载体」——**也没去读 prompt**。
-共享同一偏置时加人头无效。要靠这条规则本身，以及一个明确的角色（下节）。
+**Adding agents does not solve this**: an independent blind-test agent found the same anomaly,
+but its recommendation was also "switch to a visible carrier" — **it did not read the prompt either**.
+Adding headcount does nothing when the bias is shared. It takes this rule itself, plus an explicit role (next section).
 
-## 5.6 必须有人负责问「改完之后还是原来那个任务吗」
+## 5.6 Someone must be responsible for asking "after the change, is it still the same task"
 
-今晚打断上述模式的不是任何 agent，是带着任务语义的人类反对。
-所以复核不能只有「结论对不对」这一种，还要有一种专门问：
+What broke the above pattern tonight was not any agent, it was a human objection grounded in task semantics.
+So review cannot consist only of "is the conclusion right"; there has to be one that specifically asks:
 
-- 这个修法有没有改变任务的定义？
-- 有没有破坏某条 correctness 约束（如音视频移除同一对象）？
-- 被优化的指标是不是比率？分母有没有被偷偷缩小？
+- Does this fix change the definition of the task?
+- Does it break some correctness constraint (e.g. audio and video removing the same object)?
+- Is the metric being optimized a ratio? Has the denominator been quietly shrunk?
 
-这个角色的判据不是数据，是规格。**它没有数字可以拿，所以永远不会自己冒出来，必须被指派。**
+This role's criterion is not the data, it is the spec. **It has no number to show, so it will never appear on its own; it has to be assigned.**
 
-## 6. 记录规范
+## 6. Recording conventions
 
-- 每条样本的 gate 分数进 `data/logs/state.jsonl`，**discard 的也要记**（带 `discard_stage`/`discard_reason`）——被淘汰样本的分数是估计 h₀ 和阈值附近密度的唯一来源。
-- 实验过程写进 `avgraph-strategy-lab/LOG.md`，**被推翻的假设保留不删**。
-- 每个结论标注地位：定理 / 实测 / 猜想，以及不显著的部分要明说。
+- Every sample's gate scores go into `data/logs/state.jsonl`, **including discarded ones** (with `discard_stage`/`discard_reason`) — the scores of eliminated samples are the only source for estimating h₀ and the near-threshold density.
+- The experiment process goes into `avgraph-strategy-lab/LOG.md`, and **refuted hypotheses are kept, not deleted**.
+- Label every conclusion's status: theorem / measured / conjecture, and state explicitly which parts are not significant.
 
-## 7. 复核
+## 7. Review
 
-重要结论要派一条**对抗性**复核线，指令是「**默认它是 bug，除非你推翻不了**」。
-中立地「检查一下」大概率只会还你一个模棱两可的确认。这条不是形式主义：
-一夜之间对抗性复核找到四个真 bug，其中两个足以让全部结论作废，
-而它们都不是被更好的搜索算法找到的。
+Important conclusions get an **adversarial** review line, with the instruction "**assume it is a bug unless you cannot refute it**".
+A neutral "take a look" will most likely just hand you back an equivocal confirmation. This is not a formality:
+in one night adversarial review found four real bugs, two of which were enough to invalidate all conclusions,
+and none of them was found by a better search algorithm.

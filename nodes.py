@@ -56,11 +56,14 @@ if SAM3_FIRST_FRAME_THRESHOLD < SAM3_FIRST_FRAME_INTENDED:
         flush=True,
     )
 
-# 音频闸目前是桩：audio_removal_check 只读 mock 字段，从不调模型。
-# 沿用本文件对 SAM3 放宽闸的处理方式（commit 3bae3f0）——不静默改行为，
-# 但让它自报家门，使「闸其实没测量」这件事在日志里无法伪装成正常运行。
-# 实测后果：历史 8907 条里到达该闸的 1946 条，audio_removal_score 只有 2 个取值，
-# 1945 条恰为下面那个默认值；同口径下 visual_removal_score 有 693 个取值。
+# The audio gate is currently a stub: audio_removal_check only reads a mock field
+# and never calls a model. This follows the same treatment this file gives the
+# relaxed SAM3 gate (commit 3bae3f0) -- do not silently change behavior, but make
+# it announce itself, so "the gate does not actually measure" cannot masquerade as
+# a normal run in the logs. Measured consequence: of the 8907 historical runs, the
+# 1946 that reached this gate have only 2 distinct audio_removal_score values, and
+# 1945 of them are exactly the default below; under the same definition
+# visual_removal_score has 693 distinct values.
 AUDIO_SCORE_IS_MEASURED = False
 AUDIO_SCORE_STUB_DEFAULT = 0.90
 if not AUDIO_SCORE_IS_MEASURED:
@@ -209,7 +212,8 @@ def target_object_segmentation(state: AVState) -> AVState:
     update: AVState = {
         "mask_path": result.mask_path or "",
         "mask_area_ratio": result.mask_area_ratio,
-        # 保留首帧比例原值：低于门槛时上面那个会被抹成 0，真值只在这里
+        # Keep the raw first-frame ratio: the field above is zeroed when it falls
+        # below the threshold, so the true value survives only here
         "first_frame_ratio": result.first_frame_ratio,
         "n_instances": result.n_instances,
     }
@@ -348,23 +352,30 @@ def samaudio_best_of_remove(state: AVState) -> AVState:
 
 @track_node
 def audio_removal_check(state: AVState) -> AVState:
-    # ⚠ 这道闸是桩，不是检查。与上面的 inpainted_video_check 对照即可看出：
-    # 视觉侧有 _use_real_models() 分支、真的调 SAM3 verify_removal；
-    # 这里只读一个 **mock_** 字段，从不调用任何模型。
+    # WARNING: this gate is a stub, not a check. Compare it with
+    # inpainted_video_check above: the visual side has a _use_real_models() branch
+    # and really calls SAM3 verify_removal; this one only reads a **mock_** field
+    # and never calls any model.
     #
-    # 历史数据的后果（8907 条真实运行）：到达此闸的 1946 条里，
-    # audio_removal_score 只有 2 个取值——1945 条恰好是下面这个默认值 0.90，
-    # 另 1 条 0.55 来自显式覆盖。对照 visual_removal_score 有 693 个不同取值。
-    # 也就是说**音频侧从未被验证过，一条都没有**，"四道质量闸"实为三道加一个桩。
+    # Consequence in the historical data (8907 real runs): of the 1946 that reached
+    # this gate, audio_removal_score has only 2 distinct values -- 1945 are exactly
+    # the default 0.90 below, and 1 is 0.55 from an explicit override. By contrast
+    # visual_removal_score has 693 distinct values. In other words **the audio side
+    # has never been verified, not once**; the "four quality gates" are really three
+    # gates plus a stub.
     #
-    # 这也解释了多实例不一致为何一直无人发现：唯一可能发现它的东西不存在。
-    # 要真正实现：参照 verify_removal 的形状，对残余音频重跑分离并比较能量。
+    # This also explains why the multi-instance inconsistency went unnoticed for so
+    # long: the only thing that could have caught it does not exist.
+    # To implement for real: follow the shape of verify_removal -- rerun separation
+    # on the residual audio and compare energy.
     score = state.get("mock_audio_removal_score", AUDIO_SCORE_STUB_DEFAULT)
 
     update: AVState = {
         "audio_removal_score": score,
-        # 分数是不是测出来的，必须跟着分数一起落盘。否则下游没有任何办法
-        # 区分「音频侧确实合格」与「根本没测」——这正是 8907 条历史数据的处境。
+        # Whether the score was measured must be written to disk alongside the score
+        # itself. Otherwise downstream has no way to tell "the audio side really did
+        # pass" from "it was never measured" -- exactly the situation the 8907
+        # historical runs are in.
         "audio_score_measured": AUDIO_SCORE_IS_MEASURED,
     }
 

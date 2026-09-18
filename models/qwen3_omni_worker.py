@@ -21,15 +21,20 @@ import sys
 
 import transformers
 
-# 模型类不再写死。换 captioner 是这套架构的卖点之一（"他们可以自己换 model"），
-# 而写死类名会让换模型必须改代码——传 Qwen2.5-Omni 的 checkpoint 给 Qwen3 的 MoE 类
-# 只会加载失败。改成按名字解析，换模型只需多传两个参数。
+# The model class is no longer hard-coded. Swapping the captioner is one of this
+# architecture's selling points ("they can swap in their own model"), and a
+# hard-coded class name would force a code change to do it -- handing a
+# Qwen2.5-Omni checkpoint to Qwen3's MoE class just fails to load. Resolving by
+# name means swapping a model only takes two extra arguments.
 #
-# **但这只解开一处耦合，不等于 captioner 可以随便换。** caption_video() 里还有
-# 两处 Qwen-Omni 家族特有的东西：process_mm_info（来自 qwen_omni_utils），
-# 以及 generate 的 thinker_return_dict_in_generate / return_audio 参数（thinker-talker
-# 双头架构特有）。Qwen2.5-Omni 同属该家族，大概率能跑但未在真机验证过；
-# 换到非 Qwen 的 omni 模型必须写新 worker。换模型的完整说明见 WORKER_CONTRACT.md。
+# **But this unties one coupling only; it does not mean the captioner is freely
+# swappable.** caption_video() still contains two things specific to the Qwen-Omni
+# family: process_mm_info (from qwen_omni_utils), and generate's
+# thinker_return_dict_in_generate / return_audio arguments (specific to the
+# thinker-talker two-head architecture). Qwen2.5-Omni belongs to the same family
+# and will most likely run, but that has not been verified on real hardware;
+# moving to a non-Qwen omni model requires a new worker. Full instructions for
+# swapping models are in WORKER_CONTRACT.md.
 DEFAULT_MODEL_CLASS = "Qwen3OmniMoeForConditionalGeneration"
 DEFAULT_PROCESSOR_CLASS = "Qwen3OmniMoeProcessor"
 from qwen_omni_utils import process_mm_info
@@ -49,13 +54,14 @@ Rules:
 
 
 def _resolve(class_name: str):
-    """按名字从 transformers 取类。取不到就当场报清楚，别等到 from_pretrained 才炸。"""
+    """Look a class up in transformers by name. Fail clearly right here rather than
+    blowing up later inside from_pretrained."""
     cls = getattr(transformers, class_name, None)
     if cls is None:
         raise SystemExit(
-            f"transformers {transformers.__version__} 里没有 {class_name}。\n"
-            f"  换模型时 --model_class / --processor_class 要与 checkpoint 匹配，"
-            f"且当前 transformers 版本要支持该模型。"
+            f"transformers {transformers.__version__} has no {class_name}.\n"
+            f"  When swapping models, --model_class / --processor_class must match the "
+            f"checkpoint, and the installed transformers version must support that model."
         )
     return cls
 
@@ -137,10 +143,11 @@ def main():
     ap.add_argument("--no_audio_in_video", dest="use_audio_in_video", action="store_false")
     ap.add_argument("--out", default=None, help="Optional path to write the JSON result.")
     ap.add_argument("--model_class", default=DEFAULT_MODEL_CLASS,
-                    help="transformers 里的模型类名。换 captioner 时必须与 checkpoint 匹配"
-                         "（Qwen2.5-Omni 与 Qwen3-Omni 不是同一套类）。")
+                    help="Model class name in transformers. When swapping the captioner "
+                         "it must match the checkpoint (Qwen2.5-Omni and Qwen3-Omni are "
+                         "not the same classes).")
     ap.add_argument("--processor_class", default=DEFAULT_PROCESSOR_CLASS,
-                    help="transformers 里的 processor 类名，同上。")
+                    help="Processor class name in transformers; same caveat as above.")
     args = ap.parse_args()
 
     model, processor = load(args.model, args.attn_implementation,
@@ -149,7 +156,8 @@ def main():
         model, processor, args.video, args.max_new_tokens, args.use_audio_in_video
     )
 
-    # 记下用的是哪个模型和哪个类：换模型做对比时，没有这个就无法事后区分两次运行
+    # Record which model and which class were used: without it you cannot tell two
+    # runs apart afterwards when comparing swapped models
     result = {"caption": caption, "video": args.video, "model": args.model,
               "model_class": args.model_class}
     if args.out:

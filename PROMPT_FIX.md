@@ -1,8 +1,8 @@
-# 提取节点 prompt 的根因与修法
+# Root Cause and Fix for the Extraction Node Prompt
 
-## 根因（在哪一行）
+## Root Cause (which line)
 
-`models/object_extraction_model.py`，`SYSTEM_PROMPT`：
+`models/object_extraction_model.py`, `SYSTEM_PROMPT`:
 
 ```
 "An object qualifies only if it has a clear physical mechanism for sound production "
@@ -10,15 +10,15 @@
 "flapping wings, crackling fire). "
 ```
 
-**`a running engine` 被明写为合格示例。** GPT-4o-mini 输出 `car engine` 不是它出错——
-它精确地照做了。整条 prompt 定义了「发声」，**从未要求输出必须在视觉上可分割**，
-而下游 SAM3 需要的正是后者。
+**`a running engine` is written out as a qualifying example.** GPT-4o-mini emitting `car engine` is not a
+model error — it followed the instruction precisely. The whole prompt defines "produces sound" and
+**never requires the output to be visually segmentable**, which is exactly what downstream SAM3 needs.
 
-两个节点各自都对，**接口处的假设没人写下来**。
+The two nodes are each correct on their own; **nobody wrote down the assumption at the interface**.
 
-## 后果（实测，n=8907）
+## Consequences (measured, n=8907)
 
-| 目标 | 样本 | 通过率 |
+| Target | Samples | Pass rate |
 |---|---|---|
 | `car engine` | 665 | **0.2%** |
 | `vehicle engine` | 140 | 0% |
@@ -26,23 +26,23 @@
 | `motorcycle engine` | 76 | 0% |
 | `bus engine` | 61 | 0% |
 | `footsteps` | 40 | 0% |
-| 全管线基线 | 8907 | 21.84% |
+| full-pipeline baseline | 8907 | 21.84% |
 
-自动契约检测器（`avgraph-strategy-lab/experiments/contract_check.py`）扫出
-**32 个这样的取值，覆盖 2902 条样本、只产出 41 条、浪费 2861 条**。
+The automated contract checker (`avgraph-strategy-lab/experiments/contract_check.py`) turned up
+**32 such values, covering 2902 samples, yielding only 41 and wasting 2861**.
 
-## 为什么不能在下游修
+## Why It Cannot Be Fixed Downstream
 
-运行时把 `car engine` 换成 `car` 会**破坏音视频硬一致性约束**：
-音频侧 SAM-Audio 的提示词仍是 `car engine`（去掉引擎声），
-视觉侧却擦掉整辆车——两侧移除的不是同一个东西。
-这条约束是 correctness，不是偏好，零自由度。
+Rewriting `car engine` to `car` at runtime **breaks the audio-visual hard consistency constraint**: on the
+audio side SAM-Audio's prompt is still `car engine` (remove the engine sound), while the visual side
+erases the entire car — the two sides are not removing the same thing.
+This constraint is correctness, not preference: zero degrees of freedom.
 
-（`man's voice → person` 更明显：人除了说话还有脚步声、衣物摩擦声。
-擦掉整个人却只去掉说话声，剩下的脚步声就成了「看不见的人在走路」，
-而音频 gate 是空操作，检测不出来。）
+(`man's voice → person` is even more obvious: besides speaking, a person also produces footsteps and
+clothing rustle. Erase the whole person but remove only the speech, and the remaining footsteps become
+"an invisible person walking" — and the audio gate is a no-op, so it cannot detect this.)
 
-## 修法：改 prompt，让它一次产出合格的东西
+## The Fix: Change the Prompt So It Produces Qualifying Output in One Shot
 
 ```python
 SYSTEM_PROMPT = (
@@ -70,32 +70,32 @@ SYSTEM_PROMPT = (
 )
 ```
 
-三处关键改动：
+Three key changes:
 
-1. **(b) 视觉可分割成为硬条件**——这是原 prompt 缺失的那一半契约。
-2. **隐藏部件 → 可见整体**，并直接用 `car engine` 当反例（原 prompt 用它当正例）。
-3. **声音事件 → 发声实体**，`footsteps` → `person`。
+1. **(b) visual segmentability becomes a hard condition** — this is the half of the contract the original prompt was missing.
+2. **Hidden part → visible whole**, using `car engine` directly as the counterexample (the original prompt used it as a positive example).
+3. **Sound event → the entity producing it**, `footsteps` → `person`.
 
-一致性由此自然保持：**从头到尾只有一个词**，音频侧和视觉侧用同一个，
-不存在「换目标」这回事。
+Consistency then holds naturally: **there is only one word from end to end**, the audio side and the
+visual side use the same one, and "switching targets" simply does not arise.
 
-## 待验证（这才是实验该测的）
+## To Be Validated (this is what the experiment should actually measure)
 
-**不是**「新 prompt 能不能救回 engine 类」——那几乎必然（它们现在是 0%）。
-**而是会不会伤到现在能过的那些**：`man` 48%、`woman` 55%、`dog` 30%、`car` 34%。
-新 prompt 更严格，可能把一些本来能过的样本判成 `none`。
+**Not** "can the new prompt rescue the engine class" — that is nearly certain (they are at 0% now).
+**But whether it hurts the ones that currently pass**: `man` 48%, `woman` 55%, `dog` 30%, `car` 34%.
+The new prompt is stricter and may judge some currently passing samples as `none`.
 
-所以 A/B 必须**同时抽失败样本和成功样本**，比较：
-- 失败类：新 prompt 是否产出可分割的词（提升）
-- 成功类：新 prompt 是否仍产出同样的词（无回归）
+So the A/B **must sample failures and successes at the same time**, comparing:
+- Failure class: does the new prompt produce a segmentable word (improvement)
+- Success class: does the new prompt still produce the same word (no regression)
 
-**阻塞**：历史 caption **一条都没存**（`data/work/captions` 为空），
-8907 × 10 分钟 ≈ 1484 GPU-小时的 caption 全部丢失。要 A/B 必须重新生成，
-而 Qwen3-Omni 是 66GB MoE，空闲卡 46GB 放不下，需 CPU offload。
+**Blocker**: **not a single** historical caption was saved (`data/work/captions` is empty), so
+8907 × 10 minutes ≈ 1484 GPU-hours of caption are all lost. An A/B requires regenerating them, and
+Qwen3-Omni is a 66GB MoE that does not fit on the idle 46GB card; CPU offload is needed.
 
-## 顺带发现的两个日志缺口
+## Two Logging Gaps Found Along the Way
 
-- `sounding_objects` 列表（提取节点的完整输出）**没有落盘**，只存了最终 `object_name`。
-  所以无法回答「同一条片子里是否本来就有可分割的备选发声物体」——
-  而那可能是比改 prompt 更好的修法。
-- caption 没落盘。这两项都应该补进 `utils.py` 的写盘逻辑。
+- The `sounding_objects` list (the extraction node's full output) is **not written to disk**; only the
+  final `object_name` is stored. So the question "did this clip already contain a segmentable alternative
+  sound-producing object" cannot be answered — and that might be a better fix than changing the prompt.
+- The caption is not written to disk. Both should be added to the disk-write logic in `utils.py`.

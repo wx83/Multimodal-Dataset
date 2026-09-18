@@ -1,77 +1,88 @@
-# 种子与元种子
+# Seeds and Meta-Seeds
 
-**种子（seed）**＝这一轮从哪里开始：初始配置 + 初始计划。
-**元种子（metaseed）**＝**可行域本身**：agent 被允许改什么、不许改什么、哪些方向值得探。
+**Seed** = where this round starts: the initial configuration plus the initial plan.
+**Meta-seed** = **the feasible region itself**: what the agent is allowed to change, what it must not
+change, and which directions are worth exploring.
 
-元种子不在 (F, A, R) 三元组里，它决定这三个维度的**定义域**。这是人的 taste 注入系统的接口。
+The meta-seed is not part of the (F, A, R) triple; it determines the **domain** of those three dimensions.
+This is the interface through which human taste is injected into the system.
 
-## 为什么元种子可能是最值钱的旋钮
+## Why the Meta-Seed May Be the Most Valuable Knob
 
-实测：起点（仅仅是初始配置）值 **+43.4 ±0.8** 交付，而探测深度只值 **−1.1 ±0.1**，
-相差 40 倍。而元种子比起点更上一层——它决定起点能落在哪个集合里。
+Measured: the starting point (just the initial configuration) is worth **+43.4 ±0.8** deliveries, while
+probe depth is worth only **−1.1 ±0.1** — a 40x difference. And the meta-seed sits one level above the
+starting point: it determines which set the starting point can fall in.
 
-**但它从来没被当成变量测过。** 下面三个元种子就是为这个设计的：同一批样本、同一预算，
-只换元种子，比产出。
-
----
-
-## M1 · 保守：只调参数
-
-**可行域**：每个节点内部的数值参数。
-- `SEGMENT`：膨胀量、跟踪窗口、抽帧步长
-- `INPAINT`：`INPAINT_NUM_FRAMES`、步数、引导强度
-- `AUDIO`：seed、best-of 的 N
-- `ENHANCE`：`AVENHANCE_DENOISE_STRENGTH`、`AVENHANCE_FINE_STEPS`
-
-**不许**：换模型、改 prompt 措辞、动 LangGraph 拓扑、碰任何 gate。
-
-**赌的是**：h₀ 已经不低，配置空间小，离线调参就够，逐样本搜索是净亏（命题 1）。
-
-## M2 · 菜单：参数 + 模型选择
-
-**可行域**：M1 的全部，**加上**从预先验过格式兼容的菜单里换模型。
-- `SEGMENT`：SAM3 ｜ SAM2 ｜（其他已验过 mask 格式的）
-- `AUDIO`：SAM-Audio 的 visual-prompt ｜ text-prompt 两条路
-- `EXTRACT`：GPT-4o-mini ｜ 本地 LLM
-
-**不许**：往菜单里加新条目（那是 M3 的事）、改 prompt 措辞、碰 gate。
-
-**赌的是**：不同片子适合不同模型（样本异质性 γ > 0），而模型选择是比参数更粗、
-因而更容易学的维度。
-
-## M3 · 可扩展：允许写 glue code
-
-**可行域**：M2 的全部，**加上**允许 agent **写适配器把菜单外的模型接进来**，
-以及改 prompt 措辞。
-
-**这是 L3 重构层。** 传统做法下配置空间的边界不是由「什么有用」决定的，
-是由「谁事先写了适配器」决定的——而没人会为一个还不知道有没有用的维度先写适配层。
-agent 能按需写 glue，这个约束就松了。
-
-**不许**：改任何 gate、质量线、验收口径。**写适配器是扩展空间，改验收是动 reward。**
-
-**赌的是**：位置 2 的收益是累积的且不受采样复杂度约束（写一次 glue，
-那个维度就永久留在空间里，不需要靠样本去学）。
+**But it has never been measured as a variable.** The three meta-seeds below are designed for exactly
+that: same sample batch, same budget, only the meta-seed changes, compare the output.
 
 ---
 
-## 怎么比
+## M1 · Conservative: parameters only
 
-三个元种子，同一批样本序列，同一算力预算，比每 1000 GPU-分钟的交付条数。
+**Feasible region**: the numeric parameters inside each node.
+- `SEGMENT`: dilation amount, tracking window, frame sampling stride
+- `INPAINT`: `INPAINT_NUM_FRAMES`, number of steps, guidance strength
+- `AUDIO`: seed, best-of N
+- `ENHANCE`: `AVENHANCE_DENOISE_STRENGTH`, `AVENHANCE_FINE_STEPS`
 
-**必须同时记录的**（否则比出来的东西没法归因）：
-- 每轮实际落在 (F, A, R) 空间的哪个坐标（用 `measure_policy_space.py` 的定义测，别标注）
-- M3 里 agent 写了哪些适配器、哪些事后被证明有用 —— 这是位置 2 唯一可累积的资产
-- 每个元种子下的 h₀、σ、Δq
+**Not allowed**: swapping models, changing prompt wording, touching the LangGraph topology, touching any gate.
 
-**预期的失败模式**（先写下来，免得事后找解释）：
-- M3 可能因为 agent 把时间花在写 glue 而不是产数据上而输——所以要**分开计费**：
-  写 glue 的成本记在「一次性投资」，不摊进每条样本的成本。
-- M2 可能因为模型菜单里的选项其实差不多而与 M1 无差异——若如此，
-  说明真正的异质性不在模型这一维，应该去 M1 的参数里找。
-- 三个都可能输给「什么都不搜」的对照组。**对照组必须在场**（AGENTS.md §5 第一条）。
+**The bet**: h₀ is already not low, the configuration space is small, offline tuning is enough, and
+per-sample search is a net loss (Proposition 1).
 
-## 初始种子（每个元种子共用）
+## M2 · Menu: parameters plus model choice
 
-从 production 默认配置出发，不是从随机点。理由见 AGENTS.md §5 第二条：
-起点差异值 40 倍于探测深度，不控制它等于什么都没测。
+**Feasible region**: all of M1, **plus** swapping models from a menu whose format compatibility has been
+verified in advance.
+- `SEGMENT`: SAM3 | SAM2 | (others whose mask format has been verified)
+- `AUDIO`: SAM-Audio's visual-prompt path | text-prompt path
+- `EXTRACT`: GPT-4o-mini | local LLM
+
+**Not allowed**: adding new entries to the menu (that is M3's job), changing prompt wording, touching gates.
+
+**The bet**: different clips suit different models (sample heterogeneity γ > 0), and model choice is a
+coarser dimension than parameters, hence easier to learn.
+
+## M3 · Extensible: allowed to write glue code
+
+**Feasible region**: all of M2, **plus** allowing the agent to **write adapters that bring models outside
+the menu in**, and to change prompt wording.
+
+**This is the L3 restructuring layer.** Traditionally the boundary of the configuration space is not
+decided by "what is useful", it is decided by "who wrote an adapter in advance" — and nobody writes an
+adapter layer for a dimension whose usefulness is still unknown. When the agent can write glue on demand,
+that constraint loosens.
+
+**Not allowed**: changing any gate, quality line, or acceptance definition. **Writing adapters expands the
+space; changing acceptance changes the reward.**
+
+**The bet**: the payoff at position 2 is cumulative and not bound by sample complexity (write the glue
+once and that dimension stays in the space permanently, with no need to learn it from samples).
+
+---
+
+## How to Compare
+
+Three meta-seeds, the same sample sequence, the same compute budget, compared on deliveries per
+1000 GPU-minutes.
+
+**What must be recorded at the same time** (otherwise the comparison cannot be attributed):
+- Which coordinate in (F, A, R) space each round actually landed on (measured with the definition in `measure_policy_space.py`, not annotated by hand)
+- Which adapters the agent wrote under M3 and which proved useful afterwards — the only cumulative asset at position 2
+- h₀, σ, Δq under each meta-seed
+
+**Expected failure modes** (written down in advance, so no explanation gets invented after the fact):
+- M3 may lose because the agent spends its time writing glue instead of producing data — so **bill them
+  separately**: the cost of writing glue goes under "one-time investment" and is not amortized into the
+  per-sample cost.
+- M2 may show no difference from M1 because the options on the model menu are in fact about equal — if so,
+  the real heterogeneity is not along the model dimension, and it should be looked for in M1's parameters.
+- All three may lose to the "search nothing" control group. **The control group must be present**
+  (AGENTS.md §5, first item).
+
+## Initial Seed (shared by every meta-seed)
+
+Start from the production default configuration, not from a random point. The reason is in AGENTS.md §5,
+second item: the starting-point difference is worth 40x the probe depth, and not controlling it means
+nothing was measured at all.

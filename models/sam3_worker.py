@@ -66,10 +66,12 @@ def segment_top_mask(model, processor, frames_bgr, prompt, height, width, device
     Returns (masks, inst_counts): masks is a list of (H, W) uint8 (None where nothing
     detected); inst_counts is how many instances SAM3 returned per frame.
 
-    2026-08-30: inst_counts 是新增的。此前只取 masks[0] 丢弃其余实例，而 SAM-Audio
-    按文本分离**全部**实例——两侧口径不一致。实测已交付样本中 8.8% 命中多实例
-    （95%CI 4.3-17.0，n=80），推算全量 1945 条里约 170 条两侧删的不是同一个物体。
-    不上报实例数就无法察觉这件事。
+    2026-08-30: inst_counts is new. Previously only masks[0] was taken and the other
+    instances discarded, while SAM-Audio separates **every** instance matching the
+    text -- the two sides used different definitions. Measured: 8.8% of delivered
+    samples are multi-instance (95%CI 4.3-17.0, n=80), which extrapolates to roughly
+    170 of the full 1945 where the two sides removed different objects. Without
+    reporting the instance count this is impossible to notice.
     """
     masks = []
     inst_counts = []
@@ -182,8 +184,10 @@ def run_segment(model, processor, args, device):
         "passed": ratio > args.first_frame_threshold,
         "num_frames": len(frames_bgr),
         "mask_path": None,
-        # 首帧检出的实例数。>1 表示该词在画面里指向多个物体，而音频侧会把它们全部
-        # 分离——两侧口径不一致。只上报，是否据此拦截由 routes.py 决定。
+        # Instances detected in the first frame. >1 means the word points at multiple
+        # objects on screen, while the audio side will separate all of them -- the two
+        # sides use different definitions. Report only; whether to block on it is
+        # routes.py's decision.
         "n_instances": n_inst,
     }
     if result["passed"]:
