@@ -21,8 +21,15 @@ from routes import (
 )
 
 
-def build_graph():
-    """Build and compile the minimal AV data curation LangGraph."""
+def build_graph(checkpointer=None):
+    """Build and compile the minimal AV data curation LangGraph.
+
+    `checkpointer` (optional) is passed straight to `compile()`. With one, every
+    node boundary is a resumable checkpoint: an experiment can change one node's
+    config and re-run from that node on, reusing everything upstream instead of
+    re-generating it (LangGraph time-travel). Default None keeps the historical
+    behaviour bit-for-bit — production runs and `langgraph dev` are unaffected.
+    """
     builder = StateGraph(AVState)
 
     builder.add_node("av_caption_generation", av_caption_generation)
@@ -83,7 +90,7 @@ def build_graph():
     builder.add_edge("paired_av_output", END)
     builder.add_edge("discard_sample", END)
 
-    return builder.compile()
+    return builder.compile(checkpointer=checkpointer)
 
 
 def run_one_mock_sample():
