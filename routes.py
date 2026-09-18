@@ -46,3 +46,35 @@ def route_after_audio_check(state: AVState) -> Literal["continue", "discard"]:
     if state.get("audio_removal_score", 0.0) > AUDIO_SCORE_THRESHOLD:
         return "continue"
     return "discard"
+
+
+# ---------------------------------------------------------------------------
+# Gate identity, declared where the routing lives (manifest contract v2).
+# Each entry names the node the gate sits after, the discard_stage that node
+# writes when the gate rejects, the live condition, and whether the score it
+# reads is actually measured. Tools render and audit from this; nobody
+# maintains a copy elsewhere. `measures` for the audio gate is looked up lazily
+# because nodes imports routes.
+# ---------------------------------------------------------------------------
+from manifest import GATES, gate  # noqa: E402
+
+
+def _audio_measured() -> bool:
+    import nodes
+    return bool(nodes.AUDIO_SCORE_IS_MEASURED)
+
+
+GATES[:] = [
+    gate(after="sounding_object_extraction", discard_stage="sounding_object_extraction",
+         condition=lambda: "objects ≠ ∅", measures=lambda: True, files=["routes.py"]),
+    gate(after="target_object_segmentation", discard_stage="mask_check",
+         condition=lambda: f"mask_area_ratio > {MASK_AREA_THRESHOLD}"
+                           + (" ∧ n_instances ≤ 1" if REQUIRE_SINGLE_INSTANCE else ""),
+         measures=lambda: True, files=["routes.py"]),
+    gate(after="inpainted_video_check", discard_stage="visual_removal_check",
+         condition=lambda: f"visual_removal_score > {VISUAL_SCORE_THRESHOLD}",
+         measures=lambda: True, files=["routes.py", "models/visual_checker.py"]),
+    gate(after="audio_removal_check", discard_stage="audio_removal_check",
+         condition=lambda: f"audio_removal_score > {AUDIO_SCORE_THRESHOLD}",
+         measures=_audio_measured, files=["routes.py", "models/audio_checker.py"]),
+]
