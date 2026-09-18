@@ -1,18 +1,21 @@
-"""六个 worker 是否真的遵守同一份子进程契约。
+"""Whether all six workers really obey the same subprocess contract.
 
-为什么要有这条测试：`WORKER_CONTRACT.md` 声称换模型的入口是这份契约，
-而不是类名注入。但文档会过时，而且我写下「6/6 一致」时只 grep 了 marker
-和 --out 的存在，没核 wrapper 那一侧——这正是前一步刚犯过的错
-（改了 load() 就说 captioner 可换，没读 caption_video）。
+Why this test exists: `WORKER_CONTRACT.md` claims the entry point for swapping
+models is this contract, not class-name injection. But docs go stale, and when I
+wrote "6/6 consistent" I had only grepped for the presence of the marker and
+--out, without checking the wrapper side -- exactly the mistake made one step
+earlier (changed load() and declared the captioner swappable without reading
+caption_video).
 
-契约（见 WORKER_CONTRACT.md）：
-  worker 侧   —— 接受 --out <path> 写结果 JSON；同时 stdout 打一行
-                 `<NAME>_RESULT {json}` 并 flush
-  wrapper 侧 —— 先读 --out 指向的文件，读不到再从 stdout 找 marker 行，
-                 都失败才抛错
+The contract (see WORKER_CONTRACT.md):
+  worker side  -- accepts --out <path> and writes the result JSON there; also
+                  prints one line `<NAME>_RESULT {json}` to stdout and flushes
+  wrapper side -- reads the file at --out first, falls back to finding the marker
+                  line on stdout, and only raises if both fail
 
-这里做的是静态检查：不加载模型，只读源码。目的是让新增 worker 无法
-悄悄破坏契约，而不是验证模型跑得对。
+These are static checks: no models are loaded, only source is read. The point is
+to make it impossible for a new worker to quietly break the contract, not to
+verify that the models run correctly.
 """
 import os
 import re
@@ -22,9 +25,10 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MODELS = os.path.join(ROOT, "models")
 sys.path.insert(0, ROOT)
 
-# worker 文件 -> 驱动它的 wrapper 文件。
-# audio_removal_model.py 同时驱动两个 worker（SAM-Audio 分离 + ImageBind 选优），
-# 所以它在 _parse 时显式传 marker=；一个 wrapper 对多个 worker 是允许的。
+# worker file -> the wrapper file that drives it.
+# audio_removal_model.py drives two workers (SAM-Audio separation + ImageBind
+# selection), so it passes marker= explicitly in _parse; one wrapper driving
+# several workers is allowed.
 PAIRS = {
     "qwen3_omni_worker.py": "caption_model.py",
     "sam3_worker.py": "segmentation_model.py",
@@ -44,55 +48,55 @@ def test_every_worker_declares_a_result_marker():
     for w in PAIRS:
         s = src(w)
         assert re.search(r'RESULT_MARKER\s*=\s*"[A-Z0-9_]+_RESULT "', s), \
-            f"{w} 没有声明形如 <NAME>_RESULT 的 marker"
+            f"{w} does not declare a marker of the form <NAME>_RESULT"
 
 
 def test_every_worker_accepts_out_and_writes_it():
     for w in PAIRS:
         s = src(w)
-        assert '"--out"' in s, f"{w} 不接受 --out"
+        assert '"--out"' in s, f"{w} does not accept --out"
 
 
 def test_every_worker_also_emits_the_marker_line():
-    """兜底通道：文件写失败时 stdout 那行是唯一的结果来源，不能省。"""
+    """Fallback channel: if the file write fails, that stdout line is the only source of the result, so it cannot be skipped."""
     for w in PAIRS:
         s = src(w)
         assert "RESULT_MARKER +" in s or "RESULT_MARKER+" in s, \
-            f"{w} 没有把结果打到 stdout"
+            f"{w} does not print the result to stdout"
 
 
 def test_every_wrapper_parses_file_first_then_marker():
-    """顺序很重要：stdout 可能被模型库的日志污染，文件才是主通道。"""
+    """Order matters: stdout can be polluted by model-library logging, so the file is the primary channel."""
     for w, wrapper in PAIRS.items():
         s = src(wrapper)
-        assert "RESULT_MARKER" in s, f"{wrapper} 没有用 marker 解析"
-        assert "json.load" in s or "json.loads" in s, f"{wrapper} 没有解析 JSON"
+        assert "RESULT_MARKER" in s, f"{wrapper} does not parse via the marker"
+        assert "json.load" in s or "json.loads" in s, f"{wrapper} does not parse JSON"
         i_file = s.find("json.load(")
         i_marker = s.find("RESULT_MARKER):")
         if i_file != -1 and i_marker != -1:
             assert i_file < i_marker, \
-                f"{wrapper} 似乎先找 stdout marker 再读文件，与契约相反"
+                f"{wrapper} appears to look for the stdout marker before reading the file, the reverse of the contract"
 
 
 def test_markers_are_unique_per_worker():
-    """两个 worker 用同一个 marker 会导致解析串台。"""
+    """Two workers sharing one marker would cross wires during parsing."""
     seen = {}
     for w in PAIRS:
         m = re.search(r'RESULT_MARKER\s*=\s*"([A-Z0-9_]+_RESULT) "', src(w))
-        assert m, f"{w} 的 marker 取不到"
+        assert m, f"could not extract the marker from {w}"
         name = m.group(1)
-        assert name not in seen, f"{w} 与 {seen[name]} 用了同一个 marker {name}"
+        assert name not in seen, f"{w} and {seen[name]} use the same marker {name}"
         seen[name] = w
 
 
 def test_contract_doc_exists_and_lists_every_marker():
-    """文档漏掉某个 marker，就说明有 worker 没被记进说明书。"""
+    """A marker missing from the doc means some worker never made it into the spec."""
     doc_path = os.path.join(ROOT, "WORKER_CONTRACT.md")
-    assert os.path.exists(doc_path), "WORKER_CONTRACT.md 不存在"
+    assert os.path.exists(doc_path), "WORKER_CONTRACT.md does not exist"
     doc = open(doc_path, encoding="utf-8").read()
     for w in PAIRS:
         m = re.search(r'RESULT_MARKER\s*=\s*"([A-Z0-9_]+_RESULT) "', src(w))
-        assert m.group(1) in doc, f"{m.group(1)}（来自 {w}）没写进 WORKER_CONTRACT.md"
+        assert m.group(1) in doc, f"{m.group(1)} (from {w}) is not documented in WORKER_CONTRACT.md"
 
 
 if __name__ == "__main__":

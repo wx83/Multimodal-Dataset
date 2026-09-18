@@ -1,13 +1,17 @@
-"""多实例一致性闸的行为测试。
+"""Behavior tests for the multi-instance consistency gate.
 
-这个闸拦的是「视觉侧只删了一个实例、音频侧删了一类」的样本。视觉侧
-`sam3_worker.segment_top_mask` 只取 `masks[0]`，音频侧 SAM-Audio 按文本分离
-全部实例；当一个词在画面里指向多个物体时，两侧删的就不是同一个东西，
-违反「音频侧移除的对象与视觉侧移除的对象必须是同一个」这条 correctness 约束。
+This gate catches samples where the visual side removed only one instance while
+the audio side removed a whole class. On the visual side
+`sam3_worker.segment_top_mask` takes only `masks[0]`; on the audio side SAM-Audio
+separates every instance matching the text. When one word points at several
+objects in the frame, the two sides remove different things, violating the
+correctness constraint that the object removed from the audio must be the same
+object removed from the video.
 
-默认关闭。打开会减少交付量（实测约 8.8%），该由人决定要不要付这个代价，
-所以这里最重要的一条测试是 test_off_by_default_changes_nothing——
-闸关着时行为必须与加闸前逐位相同。
+Off by default. Turning it on reduces delivered volume (measured at about 8.8%),
+and a human should decide whether to pay that cost, so the most important test
+here is test_off_by_default_changes_nothing -- with the gate off, behavior must
+be bit-for-bit identical to before the gate existed.
 """
 import importlib
 import os
@@ -17,7 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 def _routes(require_single):
-    """按给定环境变量重新加载 routes（阈值是模块级常量，只能靠 reload 生效）。"""
+    """Reload routes with the given env var (thresholds are module-level constants, so only a reload picks them up)."""
     old = os.environ.get("REQUIRE_SINGLE_INSTANCE")
     os.environ["REQUIRE_SINGLE_INSTANCE"] = "1" if require_single else "0"
     import routes
@@ -45,14 +49,14 @@ def test_on_discards_multi_instance():
 
 
 def test_missing_count_is_not_treated_as_multi():
-    """mock 路径与旧 worker 不上报实例数。缺数据不等于多实例，不能凭空丢样本。"""
+    """The mock path and older workers do not report an instance count. Missing data is not the same as multi-instance; we must not drop samples on no evidence."""
     r = _routes(True)
     assert r.route_after_mask_check({**PASSES_AREA, "n_instances": None}) == "continue"
     assert r.route_after_mask_check(PASSES_AREA) == "continue"
 
 
 def test_area_gate_still_runs_first():
-    """面积不达标的样本，无论实例数多少都该被拦——加闸不该反过来放行。"""
+    """A sample failing the area check must be discarded regardless of instance count -- adding a gate must never let something through that used to be rejected."""
     r = _routes(True)
     assert r.route_after_mask_check({"mask_area_ratio": 0.01, "n_instances": 1}) == "discard"
 

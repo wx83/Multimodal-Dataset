@@ -40,8 +40,9 @@ class CaptionModel:
     def __init__(
         self,
         model_name: str = "Qwen/Qwen3-Omni-30B-A3B-Instruct",
-        # 换 captioner 时这两个要和 checkpoint 配套：Qwen2.5-Omni 与 Qwen3-Omni
-        # 在 transformers 里不是同一套类。None 表示用 worker 的默认（Qwen3-Omni）。
+        # When swapping the captioner these two must match the checkpoint: Qwen2.5-Omni
+        # and Qwen3-Omni are not the same classes in transformers. None means use the
+        # worker's default (Qwen3-Omni).
         model_class: str | None = None,
         processor_class: str | None = None,
         python_bin: str = DEFAULT_QWEN_PYTHON,
