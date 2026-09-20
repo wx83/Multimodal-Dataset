@@ -387,5 +387,5 @@ On the loop itself: C8's rejection is S37 (corrected by S38), the manifest
 protocol is S45, and the claim-level provenance fields are S46.
 
 Step records, the gate implementations, and the review interface live in the
-research repo (`avgraph-strategy-lab`). Ask for access if you want to read a
+research repo ([`auto-graph-research`](https://github.com/yayashuxue/auto-graph-research)). Ask for access if you want to read a
 step's raw record or re-run a pack.
