@@ -9,6 +9,7 @@ from models import (
     ObjectExtractionModel,
     SegmentationModel,
 )
+from manifest import node_meta
 from state import AVState
 from utils import (
     append_state_jsonl,
@@ -168,6 +169,7 @@ def extract_sounding_objects(caption: str) -> list[str]:
 # LangGraph nodes
 # ---------------------------
 
+@node_meta(title="AV Caption", model="Qwen3-Omni-30B", swap="L3", files=["models/caption_model.py", "models/qwen3_omni_worker.py"])
 @track_node
 def av_caption_generation(state: AVState) -> AVState:
     caption = run_av_caption_model(state)
@@ -180,6 +182,7 @@ def av_caption_generation(state: AVState) -> AVState:
     return {"caption": caption, "caption_path": caption_path}
 
 
+@node_meta(title="Sounding-object Extraction", model="gpt-4o-mini", swap="L2", flag="prompt has a located root cause", files=["models/object_extraction_model.py"])
 @track_node
 def sounding_object_extraction(state: AVState) -> AVState:
     objects = extract_sounding_objects(state.get("caption", ""))
@@ -197,6 +200,7 @@ def sounding_object_extraction(state: AVState) -> AVState:
     }
 
 
+@node_meta(title="Target Segmentation", model="SAM3", swap="L3", flag="first-frame gate relaxed", files=["models/segmentation_model.py", "models/sam3_worker.py"])
 @track_node
 def target_object_segmentation(state: AVState) -> AVState:
     sample_id = state["sample_id"]
@@ -234,6 +238,7 @@ def target_object_segmentation(state: AVState) -> AVState:
     return update
 
 
+@node_meta(title="Video Inpainting", model="EffectErase", swap="L3", files=["models/inpainting_model.py", "models/effecterase_worker.py"])
 @track_node
 def effect_erase_inpainting(state: AVState) -> AVState:
     sample_id = state["sample_id"]
@@ -249,6 +254,7 @@ def effect_erase_inpainting(state: AVState) -> AVState:
     return {"inpainted_video_path": inpainted_video_path}
 
 
+@node_meta(title="Visual-removal Check", model="SAM3 verify", measures=True, files=["models/visual_checker.py", "models/segmentation_model.py"])
 @track_node
 def inpainted_video_check(state: AVState) -> AVState:
     # Real removal check: re-segment the inpainted video with SAM3 and compare
@@ -316,6 +322,7 @@ def samaudio_text_remove(state: AVState) -> AVState:
     return update
 
 
+@node_meta(title="Audio Separation (best-of)", model="SAM-Audio + ImageBind", swap="L3", flag="separates ALL instances", files=["models/audio_removal_model.py", "models/sam_audio_worker.py", "models/ib_select_worker.py"])
 @track_node
 def samaudio_best_of_remove(state: AVState) -> AVState:
     # Best-of-10 separation: visual(mask) + text prompts x 5 fixed seeds, all 10
@@ -350,6 +357,7 @@ def samaudio_best_of_remove(state: AVState) -> AVState:
     return update
 
 
+@node_meta(title="Audio-removal Check", model="stub", measures=False, flag="score is a constant, never measured", files=["models/audio_checker.py"])
 @track_node
 def audio_removal_check(state: AVState) -> AVState:
     # WARNING: this gate is a stub, not a check. Compare it with
@@ -389,6 +397,7 @@ def audio_removal_check(state: AVState) -> AVState:
     return update
 
 
+@node_meta(title="AV Enhancement", model="LTX-2", swap="L3", files=["models/av_enhance_model.py", "models/ltx_enhance_worker.py"])
 @track_node
 def av_quality_enhancement(state: AVState) -> AVState:
     # Post-processing: mux the inpainted video with the best residual audio and
@@ -408,6 +417,7 @@ def av_quality_enhancement(state: AVState) -> AVState:
     }
 
 
+@node_meta(title="Paired Output", terminal="deliver", files=["utils.py"])
 @track_node
 def paired_av_output(state: AVState) -> AVState:
     sample_id = state["sample_id"]
@@ -442,6 +452,7 @@ def paired_av_output(state: AVState) -> AVState:
     }
 
 
+@node_meta(title="Discard", terminal="discard", files=["utils.py"])
 @track_node
 def discard_sample(state: AVState) -> AVState:
     updated_state = {
