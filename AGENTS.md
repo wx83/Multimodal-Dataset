@@ -5,7 +5,7 @@ For any agent (and any human) about to touch this pipeline. **Read this first, t
 The basis is two experiment documents:
 [Orchestration as budget allocation](https://tdoc.dev/d/avgraph-orchestration-theory/v/2) (the formal framework) and
 [Experimental results](https://tdoc.dev/d/avgraph-agent-autonomy/v/3); code and process log are at
-<https://github.com/yayashuxue/avgraph-strategy-lab>.
+<https://github.com/yayashuxue/auto-graph-research-lab>.
 
 ---
 
@@ -60,7 +60,7 @@ Every strategy conclusion takes these five quantities as input, and **so far not
 | κ search cost ratio | per-sample time with search / per-sample time without | **search wins ⟺ h₁/h₀ > κ**, one line of algebra settles it |
 | A near-threshold density | the distribution of the three scores vs where the threshold sits | the threshold amplifies quality differences by 2–163x |
 
-Tool: `avgraph-strategy-lab/experiments/decide_from_real_data.py`, just feed it `state.jsonl`.
+Tool: `experiments/decide_from_real_data.py` in the auto-graph-research-lab repo, just feed it `state.jsonl`.
 
 ## 5. Fairness checklist
 
@@ -106,7 +106,7 @@ This role's criterion is not the data, it is the spec. **It has no number to sho
 ## 6. Recording conventions
 
 - Every sample's gate scores go into `data/logs/state.jsonl`, **including discarded ones** (with `discard_stage`/`discard_reason`) — the scores of eliminated samples are the only source for estimating h₀ and the near-threshold density.
-- The experiment process goes into `avgraph-strategy-lab/LOG.md`, and **refuted hypotheses are kept, not deleted**.
+- The experiment process goes into the auto-graph-research-lab repo`s `LOG.md`, and **refuted hypotheses are kept, not deleted**.
 - Label every conclusion's status: theorem / measured / conjecture, and state explicitly which parts are not significant.
 
 ## 7. Review
