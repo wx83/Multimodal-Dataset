@@ -113,7 +113,7 @@ were found by a better search algorithm.
 ## What Must Be Written to Disk Every Round
 
 - `data/logs/state.jsonl`: the gate scores of every sample, **including the discarded ones**
-- `avgraph-strategy-lab/LOG.md`: the process log, **refuted hypotheses are kept, not deleted**
+- the research log repo`s LOG.md: the process log, **refuted hypotheses are kept, not deleted**
 - Every conclusion labeled: theorem / measured / conjecture, with the non-significant parts stated outright
 - Which adapters the agent wrote under M3 and which turned out useful afterwards — the only cumulative asset at position 2
 

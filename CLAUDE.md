@@ -13,7 +13,7 @@ SAM3 runs**; the root cause was one line of the SYSTEM_PROMPT in `models/object_
 So: **do not expect that reading this paragraph will prevent it. Under delivery pressure, the plan that produces numbers immediately always wins.**
 What actually works are the two mechanical gates below.
 
-## Two gates (both in the avgraph-strategy-lab repo)
+## Two gates (both in the auto-graph-research repo (github.com/yayashuxue/auto-graph-research))
 
 **Before launch** — `python3 loop/preflight.py <declare.json>`
 Any experiment that spends GPU or API budget has to clear this first. It blocks: large spend without having located the root cause (R1),
