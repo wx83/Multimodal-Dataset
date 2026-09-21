@@ -28,7 +28,7 @@ The two nodes are each correct on their own; **nobody wrote down the assumption 
 | `footsteps` | 40 | 0% |
 | full-pipeline baseline | 8907 | 21.84% |
 
-The automated contract checker (`avgraph-strategy-lab/experiments/contract_check.py`) turned up
+The automated contract checker (`experiments/contract_check.py in the auto-graph-research-lab repo`) turned up
 **32 such values, covering 2902 samples, yielding only 41 and wasting 2861**.
 
 ## Why It Cannot Be Fixed Downstream

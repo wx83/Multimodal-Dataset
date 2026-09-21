@@ -1,6 +1,6 @@
 """The pipeline describes itself: node metadata and gate identity, declared next
 to the code they describe and read by any tool that wants to render or audit
-the graph (avgraph-strategy-lab's studio reads this; it types nothing itself).
+the graph (the auto-graph-research studio reads this; it types nothing itself).
 
 Why (strategy-lab S66, owner 2026-09-16): a scaffold that keeps its own table of
 "what each node is" drifts the moment the pipeline changes, and cannot be
