@@ -29,19 +29,23 @@ def append_jsonl(path: str | Path, record: Dict[str, Any]) -> None:
 
 
 def effective_config() -> Dict[str, Any]:
-    """本次运行生效的闸阈值与模型身份。
+    """Gate thresholds and model identities in effect for this run.
 
-    2026-08-30：这是今晚最贵的那个教训的修法。历史 8907 条运行没有记录闸档，
-    后果是 h₀ = 21.84% 这个数无法跨配置比较——它产生自首帧闸 0.05，而代码里的
-    预期值是 0.80，按预期值回算交付量从 1945 条掉到 45 条，同一个指标在两档之间
-    差 40 倍。谁也没注意到，因为档位不在日志里。
+    2026-08-30: this is the fix for tonight's most expensive lesson. The 8907
+    historical runs did not record the gate setting, so h0 = 21.84% cannot be
+    compared across configurations -- it came from a first-frame gate of 0.05,
+    while the value the code intends is 0.80. Recomputing at the intended value
+    drops delivered samples from 1945 to 45: the same metric differs 40x between
+    the two settings. Nobody noticed, because the setting was not in the log.
 
-    对「提供架构、使用者自己换 model」这个目标来说这一条是致命的：换模型的全部
-    意义在于比较，而两次运行若不知道各自跑在什么配置下，比较就没有意义。
+    For the goal of "ship the architecture, users swap in their own model" this
+    is fatal: the entire point of swapping a model is comparison, and comparing
+    two runs is meaningless if you do not know what configuration each ran under.
 
-    阈值一律**从 routes / nodes 读**，不在这里另抄一份默认值——两份副本会漂移，
-    这正是 commit 3bae3f0 修掉的问题。惰性 import：utils 被 nodes/models 依赖，
-    模块级 import 会成环；调用时它们已加载完毕。
+    Thresholds are always **read from routes / nodes**; no second copy of the
+    defaults is kept here -- two copies drift, which is exactly the problem
+    commit 3bae3f0 fixed. Lazy import: nodes/models depend on utils, so a
+    module-level import would be circular; by call time they are already loaded.
     """
     cfg: Dict[str, Any] = {}
     try:
@@ -50,23 +54,26 @@ def effective_config() -> Dict[str, Any]:
         cfg["visual_score_threshold"] = routes.VISUAL_SCORE_THRESHOLD
         cfg["audio_score_threshold"] = routes.AUDIO_SCORE_THRESHOLD
         cfg["require_single_instance"] = routes.REQUIRE_SINGLE_INSTANCE
-    except Exception as e:                      # 落盘失败绝不能拖垮 pipeline
+    except Exception as e:                      # a logging failure must never take down the pipeline
         cfg["routes_error"] = f"{type(e).__name__}: {e}"
     try:
         import nodes
         cfg["sam3_first_frame_threshold"] = nodes.SAM3_FIRST_FRAME_THRESHOLD
         cfg["sam3_first_frame_intended"] = nodes.SAM3_FIRST_FRAME_INTENDED
-        # 哪几道闸真的在测量。一道读常数的闸和一道真检查的闸在通过率上长得一样，
-        # 不标出来就无法区分「音频侧合格」与「音频侧根本没测」。
-        # cross_modal 那道在 models/__init__.py 里被声明为最后一道闸，但从未接进图，
-        # 于是「两侧必须移除同一物体」这条 correctness 约束目前无人执行。
+        # Which gates actually measure. A gate that reads a constant and a gate
+        # that really checks look identical in the pass rate; without this flag
+        # you cannot tell "audio side passed" from "audio side was never measured".
+        # The cross_modal one is declared in models/__init__.py as the last gate
+        # but was never wired into the graph, so the correctness constraint "both
+        # sides must remove the same object" is currently enforced by nobody.
         cfg["gates_measuring"] = {
             "mask": True,
             "visual": True,
             "audio": nodes.AUDIO_SCORE_IS_MEASURED,
             "cross_modal": False,
         }
-        # 闸被放宽时显式标记，免得开发档的运行事后看起来像正常运行
+        # Mark explicitly when the gate is relaxed, so a dev-setting run does not
+        # later look like a normal run
         cfg["gate_relaxed"] = (
             nodes.SAM3_FIRST_FRAME_THRESHOLD < nodes.SAM3_FIRST_FRAME_INTENDED)
     except Exception as e:
@@ -89,10 +96,13 @@ def build_state_record(state: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "video_id": state.get("sample_id"),
         "object_name": state.get("target_object"),
-        # 2026-08-30: caption 与 sounding_objects 原本都没落盘。后果是 8907 条历史运行
-        # （约 1484 GPU-小时的 caption）无法复用，任何「换个 prompt 会怎样」的对照
-        # 都必须重新生成 caption；而 sounding_objects 缺失使得「同一条片子里是否本来
-        # 就有可分割的备选发声物体」这个问题在历史数据上无法回答。两者都近乎零成本。
+        # 2026-08-30: neither caption nor sounding_objects used to be written to
+        # disk. As a result the 8907 historical runs (about 1484 GPU-hours of
+        # captioning) cannot be reused: any "what if we changed the prompt"
+        # comparison has to regenerate captions from scratch. And the missing
+        # sounding_objects makes the question "did this clip have an alternative
+        # separable sounding object at all" unanswerable on historical data.
+        # Both are near-zero cost to record.
         "caption": state.get("caption"),
         "sounding_objects": state.get("sounding_objects"),
         "mask_path": state.get("mask_path"),
@@ -111,21 +121,27 @@ def build_state_record(state: Dict[str, Any]) -> Dict[str, Any]:
         "discard_reason": state.get("discard_reason"),
         "metrics": {
             "mask_area_ratio": state.get("mask_area_ratio"),
-            # 2026-08-30: first_frame_ratio 之前没落盘，而 segmentation_model.py 在
-            # 首帧比例低于门槛时会把 mask_area_ratio 硬写成 0.0（真实值只留在
-            # first_frame_ratio）。后果是历史 8907 条里 4789 条记为 mask=0，
-            # 看上去像「SAM3 完全没检出」，实际是「检出了但低于门槛被抹零」——
-            # 两者对应完全不同的修法（换目标 vs 调门槛），而数据无法区分。
+            # 2026-08-30: first_frame_ratio was not written to disk before, while
+            # segmentation_model.py hard-writes mask_area_ratio to 0.0 whenever the
+            # first-frame ratio is below the threshold (the real value survives only
+            # in first_frame_ratio). As a result 4789 of the 8907 historical runs are
+            # recorded as mask=0, which looks like "SAM3 detected nothing at all" but
+            # is really "it detected something, below threshold, and got zeroed" --
+            # two situations calling for completely different fixes (change the target
+            # vs. retune the threshold), and the data could not tell them apart.
             "first_frame_ratio": state.get("first_frame_ratio"),
-            # 实例数同样要落盘：不落就无法回测「加多实例闸会损失多少交付量」，
-            # 而这正是 S23 只能靠重跑 80 条 SAM3 才量出 8.8% 的原因。
+            # The instance count must be written to disk too: without it you cannot
+            # backtest "how much delivered volume would a multi-instance gate cost",
+            # which is exactly why S23 had to rerun SAM3 on 80 samples to measure 8.8%.
             "n_instances": state.get("n_instances"),
             "visual_removal_score": state.get("visual_removal_score"),
             "audio_removal_score": state.get("audio_removal_score"),
-            # 分数是否为实测。缺这一位，下游就无法区分「合格」与「没测」。
+            # Whether the score was actually measured. Without this bit, downstream
+            # cannot tell "passed" from "never measured".
             "audio_score_measured": state.get("audio_score_measured"),
         },
-        # 生效配置随每条记录落盘。没有它，两次运行的通过率不可比——见 effective_config 的注释。
+        # The effective configuration is written to disk with every record. Without it
+        # pass rates from two runs are not comparable -- see effective_config's docstring.
         "config": effective_config(),
     }
 

@@ -1,12 +1,15 @@
-"""生效配置是否随每条记录落盘。
+"""Whether the effective config is written to disk with every record.
 
-这条测试对应 2026-08-30 最贵的那个教训：8907 条历史运行没记录闸档，
-导致 h₀ = 21.84% 无法跨配置比较——它产生自首帧闸 0.05，而代码预期值是 0.80，
-按预期值回算交付量从 1945 条掉到 45 条。同一个指标在两档之间差 40 倍，
-而没人发现，因为档位不在日志里。
+This test encodes the most expensive lesson of 2026-08-30: 8907 historical runs
+never recorded which gate setting they ran under, so h0 = 21.84% cannot be
+compared across configurations -- it came from a first-frame gate of 0.05, while
+the value the code intends is 0.80, and recomputing at the intended value drops
+delivered volume from 1945 to 45. The same metric differs 40x between the two
+settings, and nobody noticed, because the setting was not in the log.
 
-对「提供架构、使用者自己换 model」这个目标，这一条是必需品而非锦上添花：
-换模型的意义全在比较，两次运行不知道各自的配置就没法比。
+For the goal of "provide the architecture, let users swap in their own models"
+this is a requirement, not a nicety: swapping models is only meaningful as a
+comparison, and two runs cannot be compared if neither knows its own config.
 """
 import os
 import sys
@@ -15,7 +18,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils import build_state_record, effective_config  # noqa: E402
 
-# 每条都必须落盘：少任何一条，某类跨运行比较就失效
+# Every one of these must be written to disk: drop any one and some class of
+# cross-run comparison stops working
 REQUIRED = [
     "mask_area_threshold",
     "visual_score_threshold",
@@ -33,18 +37,18 @@ REQUIRED = [
 def test_all_required_keys_present():
     cfg = effective_config()
     missing = [k for k in REQUIRED if k not in cfg]
-    assert not missing, f"缺字段：{missing}"
+    assert not missing, f"missing keys: {missing}"
 
 
 def test_no_group_failed_to_load():
-    """惰性 import 任一组失败都会留下 *_error，静默降级比缺字段更危险。"""
+    """A failed lazy import in any group leaves a *_error key; silently degrading is more dangerous than a missing field."""
     cfg = effective_config()
     errors = {k: v for k, v in cfg.items() if k.endswith("_error")}
-    assert not errors, f"有分组加载失败：{errors}"
+    assert not errors, f"some groups failed to load: {errors}"
 
 
 def test_thresholds_come_from_the_single_source():
-    """阈值必须与 routes/nodes 逐位一致——另抄一份就会漂移（见 commit 3bae3f0）。"""
+    """Thresholds must match routes/nodes bit-for-bit -- a second copy will drift (see commit 3bae3f0)."""
     import nodes
     import routes
     cfg = effective_config()
@@ -56,7 +60,7 @@ def test_thresholds_come_from_the_single_source():
 
 
 def test_relaxed_gate_is_flagged():
-    """闸被放宽时必须显式标记，否则开发档的运行事后看起来像正常运行。"""
+    """A relaxed gate must be flagged explicitly, otherwise a dev-setting run looks like a normal run after the fact."""
     import nodes
     cfg = effective_config()
     expected = nodes.SAM3_FIRST_FRAME_THRESHOLD < nodes.SAM3_FIRST_FRAME_INTENDED
@@ -64,22 +68,25 @@ def test_relaxed_gate_is_flagged():
 
 
 def test_gates_measuring_is_honest():
-    """「哪几道闸真的在测量」必须如实上报。
+    """Which gates actually measure something must be reported honestly.
 
-    一道读常数的闸和一道真检查的闸，在通过率上长得完全一样——历史 8907 条
-    正是这样：音频闸拒了 1 条，看起来像「音频侧几乎都合格」，实际是分数从未测量。
+    A gate that reads a constant and a gate that really checks look identical in
+    pass rate -- that is exactly what happened across the 8907 historical runs:
+    the audio gate rejected 1 sample, which looked like "almost everything passes
+    on the audio side", when in fact the score was never measured at all.
     """
     import nodes
     g = effective_config()["gates_measuring"]
     assert set(g) == {"mask", "visual", "audio", "cross_modal"}
     assert g["audio"] is nodes.AUDIO_SCORE_IS_MEASURED
-    # cross_modal 在 models/__init__.py 里被声明为最后一道闸，但从未接进图。
-    # 这条断言会在它真正接线那天失败——那正是提醒改这里的时机。
+    # cross_modal is declared in models/__init__.py as the last gate, but it was
+    # never wired into the graph. This assertion will fail the day it actually is
+    # wired in -- which is exactly when this code needs updating.
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     wiring = open(os.path.join(root, "main.py")).read() + open(
         os.path.join(root, "nodes.py")).read()
     assert "CrossModalChecker" not in wiring, \
-        "cross_modal 闸似乎已接进图，请把 gates_measuring 里的 False 改掉"
+        "the cross_modal gate appears to be wired into the graph; update the False in gates_measuring"
 
 
 def test_audio_score_carries_measured_flag():
@@ -91,12 +98,12 @@ def test_audio_score_carries_measured_flag():
 
 def test_record_carries_config():
     rec = build_state_record({"sample_id": "t", "target_object": "dog", "status": "passed"})
-    assert "config" in rec, "记录里没有 config 块"
+    assert "config" in rec, "the record has no config block"
     assert all(k in rec["config"] for k in REQUIRED)
 
 
 def test_logging_never_breaks_the_pipeline():
-    """空 state 也要能建记录——落盘失败绝不能拖垮 pipeline。"""
+    """An empty state must still produce a record -- a logging failure must never take the pipeline down."""
     rec = build_state_record({})
     assert "config" in rec
 
